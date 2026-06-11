@@ -1,0 +1,10 @@
+export type { EvidenceCard, EvidencePack, EvidencePackBuildOptions, RankEvidenceOptions, RolePackStrategy } from "./types.js";
+export { buildEvidencePacks } from "./build-evidence-packs.js";
+export { buildModelEvidencePack } from "./build-model-evidence-pack.js";
+export { rankEvidenceCards } from "./pack-ranking.js";
+export { dedupeEvidenceCards } from "./pack-deduper.js";
+export { safeHostname, safeDomainKey } from "./safe-url.js";
+export { selectSectionEvidence } from "./section-evidence-selector.js";
+export { selectFinalSources } from "./final-source-selector.js";
+export { normalizeLegacyAuthorityScore, buildEvidenceRegistryFromLegacySources } from "./legacy-pack-bridge.js";
+export { repairCitationTextWithEvidencePacks } from "./repair-pack-adapter.js";

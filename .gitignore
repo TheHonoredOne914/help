@@ -1,0 +1,60 @@
+# Dependencies
+node_modules/
+backend/node_modules/
+frontend/node_modules/
+
+# Build artifacts
+backend/dist/
+backend/build/
+frontend/dist/
+frontend/build/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Environment files (keep .env.example)
+.env
+.env.local
+.env.development
+.env.production
+.env.staging
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*.tmp
+
+# Logs
+*.log
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Coverage reports
+coverage/
+htmlcov/
+.coverage
+
+# TypeScript/JavaScript specific
+*.tsbuildinfo
+.next/
+.nuxt/
+
+# Replit
+.replit
+start.sh
+
+# Lock files (use npm)
+bun.lock
+yarn.lock
+pnpm-lock.yaml
+
+# Misc
+attached_assets/
+.vite/

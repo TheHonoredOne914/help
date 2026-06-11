@@ -1,0 +1,21 @@
+{
+  "name": "bestdel",
+  "version": "1.0.0",
+  "private": true,
+  "description": "BestDel — AI multi-model MUN research assistant.",
+  "scripts": {
+    "dev": "concurrently -k -n backend,frontend -c bgBlue,bgGreen \"npm run dev --prefix backend\" \"npm run dev --prefix frontend\"",
+    "dev:backend": "npm run dev --prefix backend",
+    "dev:frontend": "npm run dev --prefix frontend",
+    "install:all": "npm install --prefix backend && npm install --prefix frontend",
+    "build": "npm run build --prefix backend && npm run build --prefix frontend",
+    "start": "npm run start --prefix backend",
+    "start:prod": "bash start.sh"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.3"
+  },
+  "dependencies": {
+    "shell-quote": "^1.8.4"
+  }
+}
