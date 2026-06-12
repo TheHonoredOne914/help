@@ -2,7 +2,6 @@
     "experimentalServices": {
         "frontend": {
             "root": "frontend",
-            "entrypoint": "dist",
             "routePrefix": "/",
             "framework": "vite"
         },
@@ -12,9 +11,11 @@
             "routePrefix": "/_/backend"
         }
     },
-    "routes": [
-        { "handle": "filesystem" },
-        { "src": "/_/backend/(.*)", "dest": "/_/backend/$1" },
-        { "src": "/(.*)", "dest": "/index.html" }
+    "cleanUrls": true,
+    "rewrites": [
+        {
+            "source": "/((?!_/).*)",
+            "destination": "/index.html"
+        }
     ]
 }
