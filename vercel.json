@@ -2,13 +2,19 @@
     "experimentalServices": {
         "frontend": {
             "root": "frontend",
+            "entrypoint": "dist",
             "routePrefix": "/",
             "framework": "vite"
         },
         "backend": {
             "root": "backend",
-            "entrypoint": "src/index.ts", 
+            "entrypoint": "src/index.ts",
             "routePrefix": "/_/backend"
         }
-    }
+    },
+    "routes": [
+        { "handle": "filesystem" },
+        { "src": "/_/backend/(.*)", "dest": "/_/backend/$1" },
+        { "src": "/(.*)", "dest": "/index.html" }
+    ]
 }
