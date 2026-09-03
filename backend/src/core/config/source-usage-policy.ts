@@ -33,7 +33,7 @@ export function getSourceUsagePolicy(mode: SourceUsagePolicyMode): SourceUsagePo
         strictFailure: false,
         allowCompletedWithSourceGaps: true,
         allowDeterministicExtractionFallback: true,
-        roleCount: 8,
+        roleCount: 3,
       };
     case "council":
       return {

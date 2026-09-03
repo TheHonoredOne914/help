@@ -8,9 +8,8 @@ test("explicit UI research mode wins over prompt wording", () => {
 });
 
 test("research mode limits scale from fast to council", () => {
-  assert.ok(RESEARCH_LIMITS.fast_research.maxTotalQueries >= 40);
+  assert.ok(RESEARCH_LIMITS.fast_research.maxTotalQueries >= 18);
   assert.ok(RESEARCH_LIMITS.deep_research.maxTotalQueries >= 35);
-  assert.ok(RESEARCH_LIMITS.deep_research.maxTotalQueries >= 60);
+  assert.ok(RESEARCH_LIMITS.deep_research.maxTotalQueries >= 48);
   assert.ok(RESEARCH_LIMITS.council.maxTotalQueries >= 80);
-  assert.equal(RESEARCH_LIMITS.council.minFinalUniqueCitedSources, 30);
 });

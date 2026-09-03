@@ -964,7 +964,7 @@ router.post("/anthropic/conversations/:id/messages", async (req, res) => {
           },
           useCache: true,
         },
-        generationMode: "model",
+        ...(effectiveResearchMode === "fast_research" ? {} : { generationMode: "model" as const }),
         providerRouter: coreProvider.router,
         providerName: resolvedProviderName,
         model: resolvedModel,

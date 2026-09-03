@@ -151,7 +151,7 @@ function buildPlanFromCandidates(contract: AgendaContract, mode: ResearchMode, c
     agendaContract: contract,
     buckets,
     queries: deduped.queries.slice(0, Math.min(limits.maxTotalQueries, strategy.maxTotalQueries)),
-    retryPolicy: { retries: 2, backoffMs: 500 },
+    retryPolicy: { retries: mode === "fast_research" ? 0 : 1, backoffMs: 400 },
     topUpPolicy: {
       minCitationEligibleSources: limits.minCitationEligibleSources,
       minFinalUniqueCitedSources: limits.minFinalUniqueCitedSources,

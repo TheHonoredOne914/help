@@ -4,7 +4,7 @@ import { buildAgendaContract } from "../../src/core/agenda/agenda-contract.js";
 import { buildBucketedQueryPlan } from "../../src/core/retrieval/query-planner.js";
 import { runSearchPlan } from "../../src/core/retrieval/search-executor.js";
 
-test("core retrieval search uses Serper and Exa before Tavily and records provider provenance", async () => {
+test("core retrieval search uses the first healthy provider and skips the rest", async () => {
   const contract = buildAgendaContract({ requestId: "provider-integration", originalUserQuery: "India Supreme Court federalism parliamentary accountability" });
   const base = buildBucketedQueryPlan(contract, "fast_research");
   const plan = { ...base, queries: base.queries.slice(0, 1) };
@@ -26,12 +26,39 @@ test("core retrieval search uses Serper and Exa before Tavily and records provid
     },
   });
 
+  assert.equal(requestedUrls.length, 1);
+  assert.match(requestedUrls[0], /serper/);
+  assert.ok(results.some((result) => result.provider === "serper"));
+  assert.ok(results.every((result) => Array.isArray(result.discoveredBy)));
+});
+
+test("core retrieval search falls back to the next provider when the first returns nothing", async () => {
+  const contract = buildAgendaContract({ requestId: "provider-fallback", originalUserQuery: "India Supreme Court federalism parliamentary accountability" });
+  const base = buildBucketedQueryPlan(contract, "fast_research");
+  const plan = { ...base, queries: base.queries.slice(0, 1) };
+  const requestedUrls: string[] = [];
+
+  const results = await runSearchPlan(plan, {
+    live: true,
+    providerKeys: { serper: "serper-test", exa: "exa-test", tavily: "tvly-test" },
+    maxResultsPerQuery: 1,
+    fetchFn: async (url) => {
+      requestedUrls.push(String(url));
+      if (String(url).includes("serper")) {
+        return new Response(JSON.stringify({ organic: [] }), { status: 200 });
+      }
+      if (String(url).includes("exa")) {
+        return new Response(JSON.stringify({ results: [{ title: "Exa source", url: "https://prsindia.org/source", text: "Semantic PRS source", score: 0.7 }] }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ results: [{ title: "Tavily source", url: "https://pib.gov.in/source", content: "Fallback source" }] }), { status: 200 });
+    },
+  });
+
+  assert.equal(requestedUrls.length, 2);
   assert.match(requestedUrls[0], /serper/);
   assert.match(requestedUrls[1], /exa/);
-  assert.match(requestedUrls[2], /tavily/);
-  assert.ok(results.some((result) => result.provider === "serper"));
   assert.ok(results.some((result) => result.provider === "exa"));
-  assert.ok(results.every((result) => Array.isArray(result.discoveredBy)));
+  assert.equal(results.some((result) => result.provider === "tavily"), false);
 });
 
 test("core retrieval search returns no fake sources when no live providers are configured", async () => {
