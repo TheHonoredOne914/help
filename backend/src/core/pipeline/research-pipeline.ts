@@ -969,7 +969,12 @@ export function buildSourceUsageGapReport(
   attemptedQueries: string[],
   filterRejections: SourceFilterRejectionDiagnostic[],
 ): SourceGapReport | null {
-  if (aggregate.validUsageCount >= policy.requiredSources) return null;
+  const requiredSources = Math.max(
+    policy.requiredSources,
+    contract.minimumUniqueCitedSources ?? 0,
+    contract.minimumEvidenceCardsPerModel ?? 0,
+  );
+  if (aggregate.validUsageCount >= requiredSources) return null;
   if (!policy.allowCompletedWithSourceGaps && aggregate.validUsageCount < policy.minimumToProceed) return null;
   if (registry.getCitationEligibleCount() === 0) return null;
   const bucketCoverage = registry.getBucketCoverage();
@@ -986,15 +991,15 @@ export function buildSourceUsageGapReport(
     return available > 0 && used < Math.min(2, available);
   });
   return {
-    requiredUniqueSources: policy.requiredSources,
+    requiredUniqueSources: requiredSources,
     availableCitationEligibleSources: registry.getCitationEligibleCount(),
     failedBuckets,
     weakBuckets,
     attemptedQueries,
     providerErrors: aggregate.failureReports.flatMap((report) => report.providerErrors.map((error) => error.message)),
-    enrichmentFailures: [`Validated SourceUsageMap covered ${aggregate.validUsageCount}/${policy.requiredSources} required sources.`],
+    enrichmentFailures: [`Validated SourceUsageMap covered ${aggregate.validUsageCount}/${requiredSources} required sources.`],
     filterRejections,
-    explanation: `Validated SourceUsageMap covered ${aggregate.validUsageCount}/${policy.requiredSources} required sources, so the answer must be treated as a source-gap result even though ${registry.getCitationEligibleCount()} citation-eligible source(s) were retrieved.`,
+    explanation: `Validated SourceUsageMap covered ${aggregate.validUsageCount}/${requiredSources} required sources, so the answer must be treated as a source-gap result even though ${registry.getCitationEligibleCount()} citation-eligible source(s) were retrieved.`,
     repairAttempted: aggregate.rolesFailed > 0,
   };
 }

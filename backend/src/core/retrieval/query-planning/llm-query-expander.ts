@@ -17,8 +17,11 @@ export async function expandQueriesWithLlm(
   mode: ResearchMode,
   options: QueryExpansionOptions,
 ): Promise<{ queries: QueryCandidate[]; rejected: string[] }> {
-  if (!options.providerRouter || !options.providerName || !options.model || (mode !== "deep_research" && mode !== "council")) {
-    return deterministicFallback(contract);
+  if (!options.providerRouter || !options.providerName || !options.model) {
+    return { queries: [], rejected: [] };
+  }
+  if (mode !== "deep_research" && mode !== "council") {
+    return { queries: [], rejected: [] };
   }
   try {
     const json = await requestExpansion(options.providerRouter, options.providerName, options.model, contract, mode, options.timeoutMs);

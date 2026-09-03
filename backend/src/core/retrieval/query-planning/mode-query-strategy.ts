@@ -34,6 +34,7 @@ export function getModeQueryStrategy(mode: ResearchMode): ModeQueryStrategy {
         includeFallback: true,
         includeFreshness: true,
         includeParliamentary: true,
+        includeLlm: true,
       });
     case "council":
       return base(mode, limits.maxTotalQueries, 6, 6, {
@@ -44,6 +45,7 @@ export function getModeQueryStrategy(mode: ResearchMode): ModeQueryStrategy {
         includeTimeline: true,
         includeCounterargument: true,
         includeComparative: true,
+        includeLlm: true,
       });
   }
 }
