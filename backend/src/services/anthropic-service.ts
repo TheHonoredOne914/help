@@ -5,17 +5,10 @@ import {
   getArchiveContext,
   upsertArchiveContext,
   createMessage,
-  getConversationsByArchiveId,
-  getArchiveById,
-  createConversation,
   createMessageFromJson,
-  deleteConversation,
+  getArchiveById,
   getConversationById,
   getMessagesByConversationId,
-  listConversations,
-  toApiConversation,
-  toApiMessage,
-  updateConversationTitle,
   updateMessage,
   getArchiveResearchAngles,
   upsertArchiveResearchAngles,
@@ -79,6 +72,8 @@ import { writeAnthropicSseEvent } from "./anthropic/sse-bridge.js";
 import { shouldUseCoreFinalAnswer } from "./anthropic/final-response-adapter.js";
 import { buildArchiveContextText } from "./anthropic/archive-context-adapter.js";
 import { enrichedResultToCoreSource } from "./anthropic/core-route-adapter.js";
+import { registerAnthropicEnhanceRoute } from "./anthropic-enhance-route.js";
+import { registerAnthropicMetaRoutes } from "./anthropic-meta-routes.js";
 import {
   maybeMergeArchive,
   persistAssistantCompleted,
@@ -803,24 +798,16 @@ async function callGeminiNonStreaming(
 }
 
 const router = Router();
-const CreateAnthropicConversationBody = z.object({
-  title: z.string().min(1).max(200),
-  archiveId: z.number().int().positive(),
-});
-const GetAnthropicConversationParams = z.object({ id: z.number().int().positive() });
-const DeleteAnthropicConversationParams = z.object({ id: z.number().int().positive() });
-const ListAnthropicMessagesParams = z.object({ id: z.number().int().positive() });
+registerAnthropicMetaRoutes(router);
+registerAnthropicEnhanceRoute(router, { callGeminiNonStreaming });
 const SendAnthropicMessageParams = z.object({ id: z.number().int().positive() });
-const ListAnthropicConversationsQuery = z.object({
-  archiveId: z.coerce.number().int().positive().optional(),
-});
 const ResearchModeSchema = z.enum(["fast_research", "deep_research", "council"]);
 const SendAnthropicMessageBody = z.object({
-  content:       z.string().min(1),
-  mode:          z.enum(["normal", "web_search", "deep_research", "rhetorics", "drafting", "fast_research", "council"]).optional(),
-  researchMode:  ResearchModeSchema.optional(),
+  content: z.string().min(1),
+  mode: z.enum(["normal", "web_search", "deep_research", "rhetorics", "drafting", "fast_research", "council"]).optional(),
+  researchMode: ResearchModeSchema.optional(),
   rhetoricsType: z.enum(["kavita", "speech", "debate"]).optional(),
-  creativity:    z.number().min(0).max(1).optional(),
+  creativity: z.number().min(0).max(1).optional(),
 });
 
 // â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -1777,271 +1764,6 @@ export const __councilTestHooks = {
 
 
 // â”€â”€â”€ Routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
-router.get("/anthropic/conversations", async (req, res) => {
-  const ownerUserId = getRequestOwnerId(req);
-  const queryParsed = ListAnthropicConversationsQuery.safeParse(req.query);
-  if (!queryParsed.success) {
-    res.status(400).json({ error: "Invalid query" });
-    return;
-  }
-  const convos = queryParsed.data.archiveId
-    ? await getConversationsByArchiveId(queryParsed.data.archiveId, ownerUserId)
-    : await listConversations(ownerUserId);
-  res.json(convos.map(toApiConversation));
-});
-
-router.post("/anthropic/conversations", async (req, res) => {
-  const ownerUserId = getRequestOwnerId(req);
-  const parsed = CreateAnthropicConversationBody.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: "Invalid request body" }); return; }
-  const archive = await getArchiveById(parsed.data.archiveId, ownerUserId);
-  if (!archive) { res.status(404).json({ error: "Archive not found" }); return; }
-  const convo = await createConversation(parsed.data.archiveId, parsed.data.title, ownerUserId);
-  res.status(201).json(toApiConversation(convo));
-});
-
-// Update conversation title
-router.patch("/anthropic/conversations/:id", async (req, res) => {
-  const id = Number(req.params.id);
-  const ownerUserId = getRequestOwnerId(req);
-  if (!Number.isFinite(id)) { res.status(400).json({ error: "Invalid id" }); return; }
-  const title = typeof req.body?.title === "string" ? req.body.title.trim() : "";
-  if (!title) { res.status(400).json({ error: "title is required" }); return; }
-  const updated = await updateConversationTitle(id, title.slice(0, 200), ownerUserId);
-  if (!updated) { res.status(404).json({ error: "Conversation not found" }); return; }
-  res.json(toApiConversation(updated));
-});
-
-// Generate AI conversation title from first user message
-// Uses multiKeyFetch directly for seamless multi-key rotation across all providers.
-router.post("/anthropic/generate-title", async (req, res) => {
-  const content = typeof req.body?.content === "string" ? req.body.content.trim() : "";
-  if (!content) { res.status(400).json({ error: "content is required" }); return; }
-  const fallback = () => content.split(/\s+/).slice(0, 5).join(" ");
-
-  const groqKey = (req.headers["x-groq-api-key"] as string | undefined) ?? null;
-  const nvidiaKey = (req.headers["x-nvidia-api-key"] as string | undefined) ?? null;
-  const cerebrasKey = (req.headers["x-cerebras-api-key"] as string | undefined) ?? null;
-  const geminiKey = (req.headers["x-gemini-api-key"] as string | undefined) ?? null;
-
-  const titlePrompt = [
-    { role: "system" as const, content: "Generate a concise 4-6 word title (no quotes, no punctuation) for this conversation." },
-    { role: "user" as const, content: `Title for: ${content.slice(0, 500)}` },
-  ];
-
-  // Ordered list of providers to try — multiKeyFetch handles comma-separated key rotation
-  const providers: Array<{ name: string; key: string | null; baseUrl: string; model: string }> = [
-    { name: "groq", key: groqKey ?? process.env.GROQ_API_KEY ?? null, baseUrl: "https://api.groq.com/openai/v1", model: "llama-3.1-8b-instant" },
-    { name: "nvidia", key: nvidiaKey ?? process.env.NVIDIA_API_KEY ?? null, baseUrl: "https://integrate.api.nvidia.com/v1", model: "nvidia/llama-3.1-nemotron-nano-8b-v1" },
-    { name: "cerebras", key: cerebrasKey ?? process.env.CEREBRAS_API_KEY ?? null, baseUrl: "https://api.cerebras.ai/v1", model: "llama3.1-8b" },
-    { name: "gemini", key: geminiKey ?? process.env.GEMINI_API_KEY ?? null, baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-2.0-flash" },
-  ];
-
-  let title = "";
-  for (const p of providers) {
-    if (!p.key) continue;
-    try {
-      const resp = await multiKeyFetch(`${p.baseUrl}/chat/completions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${p.key}` },
-        body: JSON.stringify({ model: p.model, max_tokens: 20, messages: titlePrompt }),
-      });
-      if (resp.ok) {
-        const data = await resp.json() as any;
-        title = data.choices?.[0]?.message?.content?.trim() ?? "";
-        if (title) break;
-      }
-    } catch {
-      // Expected — continue to next provider
-    }
-  }
-
-  if (!title) title = fallback();
-  res.json({ title: title.slice(0, 80) });
-});
-
-router.get("/anthropic/conversations/:id", async (req, res) => {
-  const ownerUserId = getRequestOwnerId(req);
-  const parsed = GetAnthropicConversationParams.safeParse({ id: Number(req.params.id) });
-  if (!parsed.success) { res.status(400).json({ error: "Invalid id" }); return; }
-  const convo = await getConversationById(parsed.data.id, ownerUserId);
-  if (!convo) { res.status(404).json({ error: "Conversation not found" }); return; }
-  const msgs = await getMessagesByConversationId(parsed.data.id);
-  res.json({ ...toApiConversation(convo), messages: msgs.map(toApiMessage) });
-});
-
-router.delete("/anthropic/conversations/:id", async (req, res) => {
-  const ownerUserId = getRequestOwnerId(req);
-  const parsed = DeleteAnthropicConversationParams.safeParse({ id: Number(req.params.id) });
-  if (!parsed.success) { res.status(400).json({ error: "Invalid id" }); return; }
-  const deleted = await deleteConversation(parsed.data.id, ownerUserId);
-  if (!deleted) { res.status(404).json({ error: "Conversation not found" }); return; }
-  res.status(204).end();
-});
-
-router.get("/anthropic/conversations/:id/messages", async (req, res) => {
-  const ownerUserId = getRequestOwnerId(req);
-  const parsed = ListAnthropicMessagesParams.safeParse({ id: Number(req.params.id) });
-  if (!parsed.success) { res.status(400).json({ error: "Invalid id" }); return; }
-  const convo = await getConversationById(parsed.data.id, ownerUserId);
-  if (!convo) { res.status(404).json({ error: "Conversation not found" }); return; }
-  const msgs = await getMessagesByConversationId(parsed.data.id);
-  res.json(msgs.map(toApiMessage));
-});
-
-function buildEnhanceMetaPrompt(prompt: string, mode: string): string {
-  const isResearch = mode === "web_search" || mode === "deep_research";
-  const topic = classifyTopic(prompt);
-
-  const ANGLE_HINTS: Partial<Record<TopicType, string>> = {
-    media_press:
-      "Angles: RSF/CPJ/Freedom House index scores and trends, journalist UAPA/sedition " +
-      "cases, Article 19 jurisprudence, government PIB counter-narrative.",
-    democracy_civil_liberties:
-      "Angles: Freedom House/V-Dem/EIU score trends, UAPA crackdowns, FCRA NGO " +
-      "cancellations, internet shutdowns, HRW/Amnesty/CIVICUS, Supreme Court responses.",
-    governance_policy:
-      "Angles: CAG audit findings, NCRB statistics, PIB official position, " +
-      "parliamentary committee reports, NITI Aayog data, India UN vote record.",
-    legal:
-      "Angles: Supreme Court and High Court judgements via indiankanoon.org, " +
-      "constitutional articles, IPC/CrPC sections, PIL history, NHRC reports.",
-    economic:
-      "Angles: GDP data, Union Budget, RBI policy, NITI Aayog, IMF/World Bank, MoSPI.",
-    environment:
-      "Angles: India NDC, CPCB data, FSI forest report, MNRE energy, IPCC.",
-    security:
-      "Angles: MEA/MoD statements, SIPRI data, India UN peacekeeping, IDSA analysis.",
-  };
-
-  const angleHint = ANGLE_HINTS[topic] ??
-    "Angles: India MEA position, UN resolution numbers, bloc alignments, 2024-2025 data.";
-
-  if (!isResearch) {
-    return `Expand into a clearer, more specific Indian MUN research prompt.
-Add 3-4 specific angles and source types. Under 120 words. Output ONLY the enhanced prompt.
-Original: "${prompt.trim()}"`;
-  }
-
-  return `You are a research strategist for Indian MUN delegates.
-Rewrite this into a rich multi-angle research prompt maximizing web search quality.
-Rules: under 200 words, add 4-6 topic-specific research angles, mention source
-types (indices, court databases, reports), include year ranges 2022-2025.
-Output ONLY the enhanced prompt.
-Topic: ${topic.replace(/_/g, " ")}
-${angleHint}
-Original: "${prompt.trim()}"`;
-}
-
-// Enhance prompt endpoint
-router.post("/anthropic/enhance-prompt", async (req, res) => {
-  const { prompt, mode } = req.body as { prompt?: string; mode?: string };
-  if (!prompt || typeof prompt !== "string" || !prompt.trim()) {
-    res.status(400).json({ error: "prompt is required" });
-    return;
-  }
-  const keys = extractKeys(req);
-  const groqKey = keys.groqKey;
-  const cerebrasKey = keys.cerebrasKey;
-  const nvidiaKey = keys.nvidiaKey;
-  const geminiKey = keys.geminiKey;
-  const openrouterKey = keys.openrouterKey;
-
-  const metaPrompt = buildEnhanceMetaPrompt(prompt, mode ?? "");
-
-  try {
-    // Try Groq
-    if (isGroqEnabled(groqKey)) {
-      try {
-        const groq = getGroqClient(groqKey);
-        const resp = await groq.chat.completions.create({
-          model: "llama-3.3-70b-versatile",
-          max_tokens: 400,
-          temperature: 0.4,
-          messages: [{ role: "user", content: metaPrompt }],
-        });
-        const content = (resp.choices[0]?.message?.content ?? "").trim();
-        if (content) { res.json({ enhanced: content }); return; }
-      } catch (err) {
-        (req as any).log?.warn?.({ err, provider: "groq" }, "Enhance: groq failed, trying next provider");
-      }
-    }
-
-    // Try Cerebras — large prompt budget, fast inference (multiKeyFetch handles key rotation)
-    if (isCerebrasEnabled(cerebrasKey)) {
-      try {
-        const cerebras = getCerebrasClient(cerebrasKey);
-        const resp = await cerebras.chat.completions.create({
-          model: "llama3.3-70b",
-          max_tokens: 400,
-          temperature: 0.4,
-          messages: [{ role: "user", content: metaPrompt }],
-        });
-        const content = (resp.choices[0]?.message?.content ?? "").trim();
-        if (content) { res.json({ enhanced: content }); return; }
-      } catch (err) {
-        (req as any).log?.warn?.({ err, provider: "cerebras" }, "Enhance: cerebras failed, trying next provider");
-      }
-    }
-
-    // Try Gemini
-    if (isGeminiEnabled(geminiKey)) {
-      try {
-        const gemini = getGeminiClient(geminiKey);
-        const text = await callGeminiNonStreaming(
-          gemini,
-          "gemini-2.0-flash",
-          metaPrompt,
-          [{ role: "user" as const, content: metaPrompt }],
-          400
-        );
-        const content = text.trim();
-        if (content) { res.json({ enhanced: content }); return; }
-      } catch (err) {
-        (req as any).log?.warn?.({ err, provider: "gemini" }, "Enhance: gemini failed, trying next provider");
-      }
-    }
-
-    // Try Nvidia
-    if (isNvidiaEnabled(nvidiaKey)) {
-      try {
-        const nvidia = getNvidiaClient(nvidiaKey);
-        const resp = await nvidia.chat.completions.create({
-          model: "nvidia/llama-3.1-nemotron-nano-8b-v1",
-          max_tokens: 400,
-          messages: [{ role: "user", content: metaPrompt }],
-        });
-        const content = (resp.choices[0]?.message?.content ?? "").trim();
-        if (content) { res.json({ enhanced: content }); return; }
-      } catch (err) {
-        (req as any).log?.warn?.({ err, provider: "nvidia" }, "Enhance: nvidia failed, trying next provider");
-      }
-    }
-
-    // Try OpenRouter
-    if (openrouterKey) {
-      try {
-        const { getOpenRouterClient } = await import("../lib/openrouter-client.js");
-        const openrouter = getOpenRouterClient(openrouterKey);
-        const resp = await openrouter.chat.completions.create({
-          model: "meta-llama/llama-3.1-8b-instruct:free",
-          max_tokens: 400,
-          messages: [{ role: "user", content: metaPrompt }],
-        });
-        const content = (resp.choices[0]?.message?.content ?? "").trim();
-        if (content) { res.json({ enhanced: content }); return; }
-      } catch (err) {
-        (req as any).log?.warn?.({ err, provider: "openrouter" }, "Enhance: openrouter failed, returning original");
-      }
-    }
-
-    res.json({ enhanced: prompt });
-  } catch (err) {
-    (req as any).log?.warn?.({ err }, "Enhance prompt failed, returning original");
-    res.json({ enhanced: prompt });
-  }
-});
 
 async function handleProviderAllModes(
   req: any,
