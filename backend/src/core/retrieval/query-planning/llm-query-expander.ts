@@ -1,6 +1,7 @@
 import type { AgendaContract } from "../../agenda/agenda-contract.js";
 import type { ResearchMode } from "../../config/research-mode.js";
 import type { SourceBucketId } from "../source-buckets.js";
+import type { ProviderName } from "../../providers/provider-types.js";
 import { buildFallbackQueriesForBucket } from "./fallback-query-builder.js";
 import { filterResolvedQueryDrift } from "./query-drift-filter.js";
 import type { ProviderJsonLikeRouter, QueryCandidate, QueryExpansionOptions } from "./types.js";
@@ -41,7 +42,7 @@ function deterministicFallback(contract: AgendaContract, rejected: string[] = []
 
 async function requestExpansion(
   providerRouter: ProviderJsonLikeRouter,
-  providerName: string,
+  providerName: ProviderName,
   model: string,
   contract: AgendaContract,
   mode: ResearchMode,

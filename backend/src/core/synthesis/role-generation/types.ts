@@ -78,6 +78,16 @@ export interface ModelRoleSourceUsageInput extends ModelRoleRunnerInput {
   sourceGapReport?: SourceGapReport | null;
 }
 
+export interface HealthyProviderLookupInput {
+  providerRouter?: ProviderRouter;
+  providerName?: ProviderName;
+  model?: string;
+  autoFallback?: boolean;
+  fallbackModels?: Array<{ providerName: ProviderName; model: string }>;
+  providerStatuses?: ProviderResearchStatus[];
+  providerRunState?: ProviderRunState;
+}
+
 export interface RoleSourceUsageResult {
   roleName: string;
   requiredSourceCount: number;

@@ -7,7 +7,7 @@ import { getSourceUsagePolicy } from "../config/source-usage-policy.js";
 import { generateCoreResearchAnswer, type CoreResearchAnswerResult } from "../generation/core-answer-generator.js";
 import { buildClaimGraph, buildLegacyClaimGraphContext, type ClaimGraph } from "../evidence/claim-graph.js";
 import { buildEvidencePacks, type EvidenceCard } from "../evidence/evidence-pack-builder.js";
-import { buildEvidenceRegistryFromSources, markdownCitationUrl, type EvidenceRegistryCore, type EvidenceSource } from "../evidence/evidence-registry.js";
+import { buildEvidenceRegistryFromSources, markdownCitationUrl, type EvidenceRegistryCore, type EvidenceSource, type RawEvidenceSourceInput } from "../evidence/evidence-registry.js";
 import { buildSourceGapReport, type SourceFilterRejectionDiagnostic, type SourceGapReport } from "../evidence/source-gap-report.js";
 import { buildClaimLedger, type ClaimLedger } from "../evidence/claim-ledger.js";
 import { toEvidenceCard } from "../evidence/evidence-pack/evidence-card-adapter.js";
@@ -16,15 +16,16 @@ import { runBucketedRetrieval, type BucketedRetrievalOptions } from "../retrieva
 import { filterSourcesForAgenda } from "../retrieval/source-filter.js";
 import { validateCitations, type CitationValidationReport } from "../verification/citation-validator.js";
 import { runThesisQualityGate, type QualityGateReport } from "../verification/thesis-quality-gate.js";
-import type { ModelRoleOutput } from "../evidence/source-usage-map.js";
+import type { ModelRoleOutput, SourceUsageFailureReport } from "../evidence/source-usage-map.js";
 import { aggregateSourceUsageValidation, type SourceUsageAggregateRoleValidation } from "../evidence/source-usage/index.js";
 import { evaluateSourceContract } from "../evidence/source-contract.js";
-import { getHealthyGenerationProviders, runModelRoleForSourceUsage } from "../synthesis/model-role-runner.js";
+import { listHealthyProvidersForRole, runModelRoleForSourceUsage } from "../synthesis/model-role-runner.js";
 import { selectCardsForRole } from "../synthesis/role-generation/role-card-selector.js";
 import type { ProviderName } from "../providers/provider-types.js";
 import type { ProviderRouter } from "../providers/provider-router.js";
 import { createProviderRunState, type ProviderRunState } from "../providers/provider-run-state.js";
 import type { ProviderResearchStatus } from "../providers/provider-health.js";
+import { ProviderError } from "../providers/provider-errors.js";
 import {
   buildResearchModelPlan,
   getResearchModelAssignment,
@@ -216,7 +217,7 @@ export async function runResearchPipeline(input: ResearchPipelineInput): Promise
   const retrievalCritic = getResearchModelAssignment(researchModelPlan, "retrieval_critic");
   const queryPlan = await buildBucketedQueryPlanWithExpansion(agendaContract, mode, retrievalCritic?.generationEligible && input.providerRouter
     ? {
-        providerRouter: input.providerRouter as any,
+        providerRouter: input.providerRouter,
         providerName: retrievalCritic.providerName,
         model: retrievalCritic.model,
       }
@@ -230,12 +231,13 @@ export async function runResearchPipeline(input: ResearchPipelineInput): Promise
   throwIfAborted();
   latencyBudget.endStage("retrieval");
   flushLatencyEvents();
-  const filterResult = filterSourcesForAgenda(rawSources.map((source) => ({
+  const filterInputs: Array<RawEvidenceSourceInput & { url: string; title: string; snippet: string }> = rawSources.map((source) => ({
     ...source,
     url: source.url ?? "",
     title: source.title ?? "",
     snippet: source.snippet ?? source.excerpt ?? "",
-  })), agendaContract, { withReasons: true });
+  }));
+  const filterResult = filterSourcesForAgenda(filterInputs, agendaContract, { withReasons: true });
   const filtered = filterResult.kept;
   const filterRejections = toFilterRejectionDiagnostics(filterResult.rejected);
   emit("source_filter_completed", {
@@ -245,7 +247,7 @@ export async function runResearchPipeline(input: ResearchPipelineInput): Promise
     rejectionReasons: countRejectionReasons(filterRejections),
   });
 
-  const evidenceRegistry = buildEvidenceRegistryFromSources(filtered as any, agendaContract);
+  const evidenceRegistry = buildEvidenceRegistryFromSources(filtered, agendaContract);
   emit("evidence_registry_created", { citationEligible: evidenceRegistry.getCitationEligibleCount(), bucketCoverage: evidenceRegistry.getBucketCoverage() });
 
   const packsById = buildEvidencePacks(evidenceRegistry, agendaContract, { query: normalizedUserQuery, mode });
@@ -427,7 +429,7 @@ export async function runResearchPipeline(input: ResearchPipelineInput): Promise
         || process.env.USE_LEGACY_FALLBACK === "true"
         || process.env.CORE_GENERATION_MODE === "deterministic"
         || process.env.NODE_ENV === "test";
-      const safeDetails = error instanceof Error ? (error as any).safeDetails : undefined;
+      const safeDetails = generationFailureDetails(error);
       fallbackReason = reason;
       fallbackCode = "unexpected_generation_failure";
       originalFailureType = safeDetails?.providerFailureReports ? "provider_error" : "generation_failure";
@@ -663,7 +665,7 @@ async function runSourceUsageRoles(args: {
     && (citationEligibleCount > 0 || args.input.liveRetrieval !== true);
 
   if (shouldFailStrictSourceVolume) {
-    const error = new Error("Source usage validation failed. Insufficient sources for strict research mode.") as Error & { code?: string; sourceUsageFailureReport?: unknown };
+    const error = new Error("Source usage validation failed. Insufficient sources for strict research mode.") as Error & { code?: string; sourceUsageFailureReport?: SourceUsageFailureReport };
     error.code = "SOURCE_USAGE_VALIDATION_FAILED";
     error.sourceUsageFailureReport = {
       roleName: "source_usage_policy_gate",
@@ -677,7 +679,7 @@ async function runSourceUsageRoles(args: {
     };
     args.emit("source_usage_warning", {
       code: error.code,
-      reason: (error.sourceUsageFailureReport as any).reason,
+      reason: error.sourceUsageFailureReport.reason,
       sourceUsageFailureReport: error.sourceUsageFailureReport,
       policy,
       validUsageCount: 0,
@@ -696,21 +698,21 @@ async function runSourceUsageRoles(args: {
     } else {
       args.emit("source_usage_failed", {
         code: error.code,
-        reason: (error.sourceUsageFailureReport as any).reason,
+        reason: error.sourceUsageFailureReport.reason,
         sourceUsageFailureReport: error.sourceUsageFailureReport,
         policy,
         validUsageCount: 0,
       });
       args.emit("pipeline_failed", {
         code: error.code,
-        reason: (error.sourceUsageFailureReport as any).reason,
+        reason: error.sourceUsageFailureReport.reason,
         sourceUsageFailureReport: error.sourceUsageFailureReport,
       });
       args.emit("failed", {
         terminalStatus: "failed",
         done: true,
         code: error.code,
-        reason: (error.sourceUsageFailureReport as any).reason,
+        reason: error.sourceUsageFailureReport.reason,
         sourceUsageFailureReport: error.sourceUsageFailureReport,
       });
       // Don't throw error - allow answer to stream anyway (deployment requirement)
@@ -768,19 +770,14 @@ async function runSourceUsageRoles(args: {
   });
   if (mode === "model") {
     const healthInput = {
-      roleName: "provider_health_check",
-      evidenceCards: [],
-      evidenceRegistry: args.evidenceRegistry,
-      agendaContract: args.agendaContract,
-      mode: "model" as const,
       providerRouter: args.input.providerRouter,
       providerName: args.input.providerName,
       model: args.input.model,
       autoFallback: args.input.autoFallback === true,
     };
-    const healthy = getHealthyGenerationProviders(healthInput);
+    const healthy = listHealthyProvidersForRole(healthInput);
     const healthyNames = healthy.map((provider) => provider.providerName);
-    const configured = ["groq", "openrouter", "gemini", "nvidia", "github"].filter((providerName) => (args.input.providerRouter as any)?.hasProvider?.(providerName));
+    const configured = (["groq", "openrouter", "gemini", "nvidia", "github", "cerebras"] as ProviderName[]).filter((providerName) => args.input.providerRouter?.hasProvider(providerName));
     args.emit("provider_health_checked", {
       healthyProviders: healthyNames,
       unhealthyProviders: configured.filter((providerName) => !healthyNames.includes(providerName as ProviderName)),
@@ -891,7 +888,7 @@ async function runSourceUsageRoles(args: {
 
     if (shouldFail) {
       const failedOutput = failedOutputs[0];
-      const error = new Error("Source usage validation failed. The model listed sources without extracting/supporting claims.") as Error & { code?: string; sourceUsageFailureReport?: unknown };
+      const error = new Error("Source usage validation failed. The model listed sources without extracting/supporting claims.") as Error & { code?: string; sourceUsageFailureReport?: SourceUsageFailureReport };
       error.code = "SOURCE_USAGE_VALIDATION_FAILED";
       error.sourceUsageFailureReport = failedOutput.sourceUsageFailureReport;
       args.emit("source_usage_failed", {
@@ -1042,31 +1039,26 @@ export function resolveSourceUsageExecutionMode(args: {
   if (args.requestedMode === "deterministic") {
     return { mode: "deterministic", reason: "deterministic mode requested", healthyProviderCount: 0 };
   }
-  const healthInput = args.providerRouter && args.providerName && args.model
-    ? getHealthyGenerationProviders({
-        roleName: "source_usage_execution_mode",
-        evidenceCards: [],
-        evidenceRegistry: { getCitationEligibleCount: () => 0, getCitationEligibleSources: () => [] } as any,
-        agendaContract: { minimumEvidenceCardsPerModel: 0 } as any,
-        mode: "model",
+  const healthyProviders = args.providerRouter && args.providerName && args.model
+    ? listHealthyProvidersForRole({
         providerRouter: args.providerRouter,
         providerName: args.providerName,
         model: args.model,
         autoFallback: args.autoFallback === true,
       })
     : [];
-  if (healthInput.length > 0 && (args.liveRetrieval || args.requestedMode === "model")) {
-    return { mode: "model", reason: "healthy provider available for source usage", healthyProviderCount: healthInput.length };
+  if (healthyProviders.length > 0 && (args.liveRetrieval || args.requestedMode === "model")) {
+    return { mode: "model", reason: "healthy provider available for source usage", healthyProviderCount: healthyProviders.length };
   }
   if (process.env.SOURCE_USAGE_ROLES_USE_MODEL === "true" && args.providerRouter && args.providerName && args.model) {
-    return { mode: "model", reason: "SOURCE_USAGE_ROLES_USE_MODEL requested model mode", healthyProviderCount: healthInput.length };
+    return { mode: "model", reason: "SOURCE_USAGE_ROLES_USE_MODEL requested model mode", healthyProviderCount: healthyProviders.length };
   }
   return {
     mode: "deterministic",
     reason: args.liveRetrieval && !args.allowSyntheticSourceUsage
       ? "no healthy provider available; using evidence-based deterministic extraction where policy allows"
       : "model source usage provider unavailable",
-    healthyProviderCount: healthInput.length,
+    healthyProviderCount: healthyProviders.length,
   };
 }
 
@@ -1098,7 +1090,7 @@ async function retrieveLiveSourcesIfNeeded(
   emit: (type: PipelineEvent["type"], data?: Record<string, unknown>) => void,
   latencyBudget: LatencyBudgetManager,
 ): Promise<Array<Partial<EvidenceSource> & { excerpt?: string }>> {
-  const shouldLiveRetrieve = input.liveRetrieval ?? (mode === "fast_research" || mode === "deep_research");
+  const shouldLiveRetrieve = input.liveRetrieval ?? true;
   if (!shouldLiveRetrieve && input.allowMockRetrieval) {
     const result = await runBucketedRetrieval(queryPlan, { ...(input.searchOptions ?? {}), live: false, mode, timeoutMs: latencyBudget.providerCallTimeoutMs, extractionTimeoutMs: latencyBudget.extractionTimeoutMs, maxConcurrency: latencyBudget.maxConcurrentSearches, abortSignal: input.signal });
     bridgeRetrievalEvents(result, emit);
@@ -1297,6 +1289,17 @@ function buildDegradedState(
     originalError: fallbackReason,
     recoveredWith: compatibilityMode ? "compatibility_mode" : fallbackCode,
   };
+}
+
+function generationFailureDetails(error: unknown): { providerFailureReports?: unknown; promptBudgetReports?: unknown } | undefined {
+  if (error instanceof ProviderError && error.safeDetails && typeof error.safeDetails === "object") {
+    return error.safeDetails as { providerFailureReports?: unknown; promptBudgetReports?: unknown };
+  }
+  if (error && typeof error === "object" && "safeDetails" in error) {
+    const details = (error as { safeDetails?: { providerFailureReports?: unknown; promptBudgetReports?: unknown } }).safeDetails;
+    return details;
+  }
+  return undefined;
 }
 
 function getEffectiveSourceUsageTarget(mode: ResearchMode, contract: AgendaContract, policy: ReturnType<typeof getSourceUsagePolicy>): number {
