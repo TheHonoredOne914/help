@@ -1,15 +1,8 @@
 import { Router } from "express";
-import { z } from "zod";
-import { createHash, randomUUID } from "node:crypto";
 import {
   getArchiveContext,
   upsertArchiveContext,
   createMessage,
-  createMessageFromJson,
-  getArchiveById,
-  getConversationById,
-  getMessagesByConversationId,
-  updateMessage,
   getArchiveResearchAngles,
   upsertArchiveResearchAngles,
 } from "../db.js";
@@ -24,7 +17,6 @@ import type { CourtJudgement } from "../lib/web-search.js";
 import { enrichResults, formatRagContext, formatRagContextFromPassages, rerankPassages, decomposeQuery, canonicalizeUrl, countCitations, buildSearchSystem, classifyTopic, type TopicType } from "../lib/rag.js";
 import { verifyAnswer, type VerifyClients } from "../lib/verify.js";
 import { resolveProvider, extractKeys, parseProviderModelId } from "../lib/provider-router.js";
-import { composeAnthropicSystemPrompt } from "../lib/chat-system-prompt.js";
 import { createSseWriter } from "../lib/sse.js";
 import { getOpenRouterClient } from "../lib/openrouter-client.js";
 import { buildNumberedSourceEntries, computeCitationCoverage, computeCitationCoverageStrict, formatNumberedSourceList, normalizeSourceCitations } from "../lib/citation-normalizer.js";
@@ -46,32 +38,46 @@ import { chunkSourceManifest, type ContextChunk } from "../lib/context-chunker.j
 import { compileFullSourceManifest, type FullSourceManifest } from "../lib/source-compiler.js";
 import { runResearchPipeline } from "../core/pipeline/research-pipeline.js";
 import type { PipelineEvent, ResearchRunIdentity } from "../core/pipeline/pipeline-events.js";
-import { embedPipelineMetadata, stripPipelineMetadata } from "../core/pipeline/pipeline-metadata.js";
+import { stripPipelineMetadata } from "../core/pipeline/pipeline-metadata.js";
 import { evaluateSourceContract } from "../core/evidence/source-contract.js";
 import { agendaOutputDepthForMode, inferResearchMode, type ResearchMode } from "../core/config/research-mode.js";
 import { buildAgendaContract } from "../core/agenda/agenda-contract.js";
 import { buildBucketedQueryPlanWithExpansion } from "../core/retrieval/query-planning/build-query-plan.js";
 import { runBucketedRetrieval, type BucketedRetrievalResult } from "../core/retrieval/bucketed-retrieval.js";
-import type { RawEvidenceSourceInput } from "../core/evidence/evidence-registry.js";
-import { runCouncilSession, type CouncilSession } from "../core/council/index.js";
+import { runCouncilSession } from "../core/council/index.js";
 import { buildResultSnapshot, decideRunTerminalStatus, normalizeProviderError, persistRunSnapshot, selectCanonicalRunTerminalStatus, serializeDivisionOutputs } from "../core/run-state/index.js";
-import { envelopeRunEvent as buildRunEventEnvelope, TerminalWriteGuard } from "../core/streaming/run-stream/index.js";
-import { detectFreshnessNeeded } from "../core/freshness/freshness-router.js";
+import { TerminalWriteGuard } from "../core/streaming/run-stream/index.js";
 import { getSourceUsagePolicy } from "../core/config/source-usage-policy.js";
-import { ProviderRouter as CoreProviderRouter } from "../core/providers/provider-router.js";
-import { multiKeyFetch } from "../lib/multi-key-fetch.js";
-import { getRequestOwnerId } from "../lib/request-auth.js";
-import { GroqProvider } from "../core/providers/groq-provider.js";
-import { OpenRouterProvider } from "../core/providers/openrouter-provider.js";
-import { GeminiProvider } from "../core/providers/gemini-provider.js";
-import { NvidiaProvider } from "../core/providers/nvidia-provider.js";
-import { GithubProvider } from "../core/providers/github-provider.js";
-import { CerebrasProvider } from "../core/providers/cerebras-provider.js";
-import type { ProviderName } from "../core/providers/provider-types.js";
 import { writeAnthropicSseEvent } from "./anthropic/sse-bridge.js";
 import { shouldUseCoreFinalAnswer } from "./anthropic/final-response-adapter.js";
 import { buildArchiveContextText } from "./anthropic/archive-context-adapter.js";
 import { enrichedResultToCoreSource } from "./anthropic/core-route-adapter.js";
+import { buildCoreProviderRouter } from "./anthropic/core-provider-router.js";
+import {
+  buildCouncilFinalAnswer,
+  buildCouncilMetadata,
+  councilRetrievalSourceToEvidenceInput,
+  __councilTestHooks,
+} from "./anthropic/council-render.js";
+import {
+  DEFAULT_GROQ_MODEL,
+  loadMessageRouteContext,
+} from "./anthropic/message-preflight.js";
+import {
+  assistantPersistenceStore,
+  persistResearchExhausted,
+} from "./anthropic/persistence-store.js";
+import {
+  buildLegacyTerminalMetadata,
+  coreProviderNameFromModel,
+  embedPipelineMeta,
+  envelopeRunEvent,
+  isResearchRouteMode,
+  modeAwareFailureTitle,
+  normalizeLegacySsePayload,
+  type PipelineMetadata,
+} from "./anthropic/pipeline-types.js";
+import { ensureResearchWorkerModels } from "./anthropic/worker-models.js";
 import { registerAnthropicEnhanceRoute } from "./anthropic-enhance-route.js";
 import { registerAnthropicMetaRoutes } from "./anthropic-meta-routes.js";
 import {
@@ -250,7 +256,7 @@ async function mergeArchiveSummaries(
 }
 
 async function mergeAssistantAnswerIntoArchiveContext(
-  archiveId: number | undefined,
+  archiveId: number | null | undefined,
   existingSummary: string | undefined,
   answer: string,
   topicType?: TopicType,
@@ -271,21 +277,7 @@ async function mergeAssistantAnswerIntoArchiveContext(
   await upsertArchiveContext(archiveId, mergedSummary);
 }
 
-export function ensureResearchWorkerModels(
-  mode: string,
-  models: string[],
-  fallbackModel = "groq/llama-3.3-70b-versatile",
-): string[] {
-  if (mode !== "web_search" && mode !== "deep_research") return models;
-  if (models.length >= 2) return models;
-
-  const planner = models[0] ?? fallbackModel;
-  const fallbackWorker = planner !== fallbackModel
-    ? fallbackModel
-    : "groq/llama-3.1-8b-instant";
-
-  return [planner, fallbackWorker];
-}
+export { ensureResearchWorkerModels, buildCoreProviderRouter, __councilTestHooks };
 
 function countDataBullets(answer: string): number {
   const statsSection = answer.match(/##\s*Key Statistics & Data\s*([\s\S]*?)(?:\n##\s|$)/i)?.[1] ?? "";
@@ -800,15 +792,6 @@ async function callGeminiNonStreaming(
 const router = Router();
 registerAnthropicMetaRoutes(router);
 registerAnthropicEnhanceRoute(router, { callGeminiNonStreaming });
-const SendAnthropicMessageParams = z.object({ id: z.number().int().positive() });
-const ResearchModeSchema = z.enum(["fast_research", "deep_research", "council"]);
-const SendAnthropicMessageBody = z.object({
-  content: z.string().min(1),
-  mode: z.enum(["normal", "web_search", "deep_research", "rhetorics", "drafting", "fast_research", "council"]).optional(),
-  researchMode: ResearchModeSchema.optional(),
-  rhetoricsType: z.enum(["kavita", "speech", "debate"]).optional(),
-  creativity: z.number().min(0).max(1).optional(),
-});
 
 // â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -1290,63 +1273,6 @@ async function synthesizeDraftsForMUN(
   return response.choices?.[0]?.message?.content ?? "";
 }
 
-// â”€â”€â”€ Pipeline metadata embedding â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// Pipeline data (per-model searches/results, discussion, sources) is stored
-// at the END of the assistant message content as a hidden HTML comment so
-// the frontend can re-render the research pipeline for completed messages.
-const PIPELINE_META_MARKER_OPEN = "<!--BESTDEL_PIPELINE:";
-const PIPELINE_META_MARKER_CLOSE = "-->";
-
-interface PipelineMetadata {
-  runId?: string;
-  requestId?: string;
-  conversationId?: number | string;
-  assistantMessageId?: number | string;
-  queryHash?: string;
-  researchMode?: ResearchMode;
-  terminalStatus?: "completed" | "completed_with_source_gaps" | "degraded_fallback" | "failed" | "provider_error" | "legacy_fallback_used" | "cancelled";
-  coreGenerationUsed?: boolean;
-  legacyFallbackUsed?: boolean;
-  liveRetrievalUsed?: boolean;
-  sourceContract?: {
-    requiredSources: number;
-    citationEligibleSources: number;
-    finalUniqueCitedSources: number;
-    passedStrict?: boolean;
-    passedWithSourceGaps?: boolean;
-    passed: boolean;
-    status?: "passed" | "passed_with_source_gaps" | "failed";
-    reason?: string;
-  };
-  sourceGapReport?: unknown;
-  qualityGate?: unknown;
-  citationStatus?: unknown;
-  sourceUsageFailureReports?: unknown;
-  providerErrors?: unknown;
-  councilSession?: unknown;
-  degradedFallbackUsed?: boolean;
-  deterministicCitedFallbackUsed?: boolean;
-  citationRepairAttempted?: boolean;
-  citationRepairSucceeded?: boolean;
-  underCitationReason?: string;
-  bucketCoverage?: unknown;
-  mode?: "web_search" | "deep_research" | ResearchMode;
-  models?: {
-    key: string;
-    label: string;
-    searches: string[];
-    found: { title: string; url: string; engine?: string; sourceType?: string }[];
-    exhausted: { reason: "rate_limit" | "error" } | null;
-  }[];
-  discussion?: string | null;
-  sources?: { sourceId?: number; title: string; url: string; sourceType?: string; bucketIds?: string[]; cited?: boolean }[];
-  legacyDebug?: unknown;
-}
-
-function embedPipelineMeta(content: string, meta: PipelineMetadata): string {
-  return embedPipelineMetadata(content, meta as unknown as Record<string, unknown>);
-}
-
 interface ActiveResearchRun {
   identity: ResearchRunIdentity;
   abortController: AbortController;
@@ -1356,408 +1282,6 @@ interface ActiveResearchRun {
 
 const activeResearchRunsByConversation = new Map<number, ActiveResearchRun>();
 
-const assistantPersistenceStore = {
-  async insertAssistantMessage(conversationId: number, content: string, metadataJson?: string | null, runId?: string | null, runStatus?: string | null) {
-    await createMessageFromJson(conversationId, "assistant", content, metadataJson ?? null, runId ?? null, runStatus ?? null);
-  },
-  async updateAssistantMessage(id: number | string, content: string, metadataJson?: string | null, runId?: string | null, runStatus?: string | null) {
-    await updateMessage(Number(id), {
-      content,
-      ...(metadataJson !== undefined ? { metadataJson } : {}),
-      ...(runId !== undefined ? { runId } : {}),
-      ...(runStatus !== undefined ? { runStatus } : {}),
-    });
-  },
-};
-
-function queryHashFor(content: string): string {
-  return createHash("sha256").update(content).digest("hex").slice(0, 16);
-}
-
-function isResearchRouteMode(mode: string): boolean {
-  return mode === "web_search" || mode === "deep_research" || mode === "fast_research" || mode === "council";
-}
-
-function normalizeEffectiveResearchMode(userContent: string, mode: string, selected?: ResearchMode): ResearchMode {
-  if (selected) return selected;
-  if (mode === "fast_research" || mode === "deep_research" || mode === "council") return mode;
-  return inferResearchMode(userContent, mode === "web_search" ? "web_search" : "deep_research");
-}
-
-function coreProviderNameFromModel(model: string): string | undefined {
-  const slash = model.indexOf("/");
-  return slash > 0 ? model.slice(0, slash) : undefined;
-}
-
-function modeAwareFailureTitle(mode: ResearchMode, terminalStatus: string): string {
-  if (terminalStatus === "cancelled") return "Research Cancelled";
-  if (terminalStatus === "provider_error") return "Provider Error";
-  switch (mode) {
-    case "fast_research":
-      return "Fast Research Failed";
-    case "deep_research":
-      return "Deep Research Failed";
-    case "council":
-      return "Council Research Failed";
-    default:
-      return "Response Failed";
-  }
-}
-
-function envelopeRunEvent(identity: ResearchRunIdentity, eventType: string, payload: Record<string, unknown> = {}): Record<string, unknown> {
-  return buildRunEventEnvelope(identity, eventType, payload);
-}
-
-function normalizeLegacySsePayload(identity: ResearchRunIdentity | undefined, payload: Record<string, unknown>): Record<string, unknown> {
-  if (!identity) return payload;
-  const eventType = typeof payload.eventType === "string"
-    ? payload.eventType
-    : typeof payload.type === "string"
-      ? payload.type
-      : typeof payload.content === "string"
-        ? "answer_delta"
-        : "legacy_event";
-  return envelopeRunEvent(identity, eventType, {
-    diagnostics: payload.diagnostics ?? {
-      legacyPath: true,
-      terminalStatus: payload.terminalStatus ?? null,
-      code: payload.code ?? null,
-      error: payload.error ?? null,
-    },
-    ...payload,
-  });
-}
-
-function buildLegacyTerminalMetadata(
-  identity: ResearchRunIdentity | undefined,
-  terminalStatus: PipelineMetadata["terminalStatus"],
-  extra: PipelineMetadata = {},
-): PipelineMetadata {
-  return {
-    runId: identity?.runId,
-    requestId: identity?.requestId,
-    conversationId: identity?.conversationId,
-    assistantMessageId: identity?.assistantMessageId,
-    queryHash: identity?.queryHash,
-    researchMode: identity?.researchMode,
-    terminalStatus,
-    coreGenerationUsed: false,
-    legacyFallbackUsed: terminalStatus === "legacy_fallback_used" || extra.legacyFallbackUsed === true,
-    liveRetrievalUsed: extra.liveRetrievalUsed ?? true,
-    ...extra,
-  };
-}
-
-async function persistResearchExhausted(input: {
-  conversationId: number;
-  runIdentity?: ResearchRunIdentity;
-  citationEligibleSources: number;
-  send: (data: object) => void;
-  metadata?: PipelineMetadata;
-}): Promise<PipelineMetadata["terminalStatus"]> {
-  const terminalStatus: PipelineMetadata["terminalStatus"] =
-    input.citationEligibleSources > 0 ? "completed_with_source_gaps" : "failed";
-  const message = input.citationEligibleSources > 0
-    ? "Research retrieved some evidence, but every model/context batch was exhausted before a validated final answer could be produced."
-    : "Research could not retrieve usable evidence, so no validated final answer was produced.";
-  const metadata = buildLegacyTerminalMetadata(input.runIdentity, terminalStatus, {
-    ...input.metadata,
-    terminalStatus,
-    sourceGapReport: {
-      reason: "both_exhausted",
-      citationEligibleSources: input.citationEligibleSources,
-      message,
-    },
-  });
-
-  await persistAssistantFailed({
-    store: assistantPersistenceStore,
-    conversationId: input.conversationId,
-    assistantMessageId: input.runIdentity?.assistantMessageId,
-    title: terminalStatus === "failed" ? "Research Failed" : "Research Completed With Source Gaps",
-    message,
-    metadata,
-  });
-  input.send({
-    eventType: terminalStatus,
-    bothExhausted: true,
-    done: true,
-    terminalStatus,
-    sourceGapReport: metadata.sourceGapReport,
-  });
-  return terminalStatus;
-}
-
-export function buildCoreProviderRouter(keys: RequestKeys, rawModelId: string): { router?: CoreProviderRouter; providerName?: ProviderName; model?: string; error?: string } {
-  const parsed = parseProviderModelId(rawModelId);
-  const router = new CoreProviderRouter();
-  if (keys.groqKey || process.env.GROQ_API_KEY) router.register(new GroqProvider({ apiKey: keys.groqKey ?? process.env.GROQ_API_KEY, fetchFn: multiKeyFetch }));
-  const openrouterKey = keys.openrouterKey ?? process.env.OPENROUTER_API_KEY ?? process.env.OPENROUTER_KEY;
-  if (openrouterKey) router.register(new OpenRouterProvider({ apiKey: openrouterKey, fetchFn: multiKeyFetch }));
-  if (keys.geminiKey || process.env.GEMINI_API_KEY) router.register(new GeminiProvider({ apiKey: keys.geminiKey ?? process.env.GEMINI_API_KEY, fetchFn: multiKeyFetch }));
-  if (keys.nvidiaKey || process.env.NVIDIA_API_KEY) router.register(new NvidiaProvider({ apiKey: keys.nvidiaKey ?? process.env.NVIDIA_API_KEY, fetchFn: multiKeyFetch }));
-  const githubToken = keys.githubToken ?? process.env.GITHUB_MODELS_API_KEY ?? process.env.GITHUB_TOKEN;
-  if (githubToken) router.register(new GithubProvider({ apiKey: githubToken, fetchFn: multiKeyFetch }));
-  const cerebrasKey = keys.cerebrasKey ?? process.env.CEREBRAS_API_KEY;
-  if (cerebrasKey) router.register(new CerebrasProvider({ apiKey: cerebrasKey, fetchFn: multiKeyFetch }));
-  if (parsed.prefix === "groq") {
-    if (!keys.groqKey && !process.env.GROQ_API_KEY) return { error: "Groq provider unavailable: missing API key" };
-    return { router, providerName: "groq", model: parsed.modelId };
-  }
-  if (parsed.prefix === "openrouter") {
-    if (!openrouterKey) return { error: "OpenRouter provider unavailable: missing API key" };
-    return { router, providerName: "openrouter", model: parsed.modelId };
-  }
-  if (parsed.prefix === "gemini") {
-    if (!keys.geminiKey && !process.env.GEMINI_API_KEY) return { error: "Gemini provider unavailable: missing API key" };
-    return { router, providerName: "gemini", model: parsed.modelId };
-  }
-  if (parsed.prefix === "nvidia") {
-    if (!keys.nvidiaKey && !process.env.NVIDIA_API_KEY) return { error: "NVIDIA provider unavailable: missing API key" };
-    return { router, providerName: "nvidia", model: parsed.modelId };
-  }
-  if (parsed.prefix === "github") {
-    if (!githubToken) return { error: "GitHub Models provider unavailable: missing token" };
-    return { router, providerName: "github", model: parsed.modelId };
-  }
-  if (parsed.prefix === "cerebras") {
-    if (!cerebrasKey) return { error: "Cerebras provider unavailable: missing API key" };
-    return { router, providerName: "cerebras", model: parsed.modelId };
-  }
-  return { error: `Core model-backed generation does not support provider prefix '${parsed.prefix}'` };
-}
-
-function councilRetrievalSourceToEvidenceInput(source: BucketedRetrievalResult["enrichedResults"][number]): RawEvidenceSourceInput {
-  return {
-    title: source.title,
-    url: source.url,
-    canonicalUrl: source.canonicalUrl ?? source.url,
-    domain: source.domain,
-    date: source.publishedDate,
-    excerpt: source.fullText ?? source.snippet,
-    snippet: source.snippet,
-    fullText: source.fullText ?? null,
-    bucketIds: source.bucketIds,
-    sourceClass: source.sourceClass,
-    authorityScore: source.score,
-    extractionQuality: source.extractionQuality ?? "snippet",
-    discoveredBy: source.discoveredBy,
-    extractionProvider: source.extractionProvider,
-    keyFacts: [source.snippet, source.fullText?.slice(0, 280)]
-      .filter((value): value is string => typeof value === "string" && value.trim().length >= 24),
-    keyNumbers: [...new Set(`${source.title} ${source.snippet} ${source.fullText ?? ""}`.match(/\b20\d{2}\b|\b\d+(?:\.\d+)?%/g) ?? [])].slice(0, 5),
-    legalHoldings: source.sourceClass === "court_primary" || source.sourceClass === "legal_commentary" ? [source.snippet].filter((value): value is string => Boolean(value)) : [],
-    limitations: source.limitations ?? [],
-    citationEligible: source.citationEligible ?? false,
-    topChunks: source.fullText
-      ? [{ text: source.fullText.slice(0, 700), score: 0.7, chunkIndex: 0 }]
-      : source.snippet
-        ? [{ text: source.snippet, score: 0.4, chunkIndex: 0 }]
-        : [],
-  };
-}
-
-function renderCouncilSessionAnswer(session: CouncilSession): string {
-  const councillorSections = Object.values(session.councillors)
-    .filter((output): output is NonNullable<typeof output> => Boolean(output))
-    .map((output) => [
-      `## ${output.councillor_id}: ${output.title}`,
-      output.status === "failed" ? `Status: failed. ${output.error ?? ""}` : output.summary,
-      ...output.key_claims.slice(0, 12).map((claim) => `- ${claim.text} (${claim.source_ids.join(", ")})`),
-    ].join("\n"))
-    .join("\n\n");
-  const sealLines = session.seals.length
-    ? session.seals.map((seal) => `- ${seal.claim.text} (${seal.support_count} councillors: ${seal.endorsing_councillors.join(", ")})`).join("\n")
-    : "- No Council Seal reached the 3-councillor threshold.";
-  const disputeLines = session.disputes.length
-    ? session.disputes.slice(0, 6).map((dispute) => `- ${dispute.summary}`).join("\n")
-    : "- No major disputes were detected.";
-  const verdict = session.verdict;
-  const verdictSection = verdict
-    ? [
-        "## Chief Councillor Verdict",
-        verdict.strategic_position,
-        "### Top Arguments",
-        ...verdict.top_arguments.map((item) => `- ${item.argument} (${item.strength})`),
-        "### Top Vulnerabilities",
-        ...verdict.top_vulnerabilities.map((item) => `- ${item.vulnerability} (${item.severity})`),
-        "### Speech Strategy",
-        verdict.recommended_speech_strategy,
-        "### POI Bank",
-        ...verdict.poi_bank.slice(0, 8).map((item) => `- ${item.poi} - ${item.timing_cue}`),
-      ].join("\n")
-    : "## Chief Councillor Verdict\nNo Chief verdict could be generated.";
-  return [
-    "# Council Session",
-    `Agenda: ${session.topic}`,
-    `Status: ${session.terminalStatus}`,
-    "",
-    "## Council Seals",
-    sealLines,
-    "",
-    "## Disputes",
-    disputeLines,
-    "",
-    councillorSections,
-    "",
-    verdictSection,
-  ].join("\n").trim();
-}
-
-const COUNCIL_REQUIRED_SOURCES = 180;
-const COUNCIL_MIN_FINAL_WORDS = 3000;
-const COUNCIL_MAX_FINAL_WORDS = 5500;
-
-function buildCouncilFinalAnswer(session: CouncilSession, retrieval: BucketedRetrievalResult): string {
-  const baseAnswer = renderCouncilSessionAnswer(session);
-  const answerSourceIds = extractCouncilMarkdownSourceIds(baseAnswer);
-  const citedCount = answerSourceIds.size;
-  if (countWords(baseAnswer) >= COUNCIL_MIN_FINAL_WORDS && citedCount >= COUNCIL_REQUIRED_SOURCES) {
-    return trimCouncilAnswerToWordCap(baseAnswer);
-  }
-
-  let bestUnderCap = "";
-  for (const factWordLimit of [18, 14, 12, 8, 5]) {
-    const evidenceSection = buildCouncilEvidenceSection(retrieval, factWordLimit, COUNCIL_REQUIRED_SOURCES);
-    if (!evidenceSection) continue;
-    const candidate = `${baseAnswer.trim()}\n\n${evidenceSection}`;
-    const candidateWords = countWords(candidate);
-    const candidateCitations = extractCouncilMarkdownSourceIds(candidate).size;
-    if (
-      candidateWords >= COUNCIL_MIN_FINAL_WORDS
-      && candidateCitations >= COUNCIL_REQUIRED_SOURCES
-      && candidateWords <= COUNCIL_MAX_FINAL_WORDS
-    ) {
-      return candidate;
-    }
-    if (candidateWords <= COUNCIL_MAX_FINAL_WORDS && candidateWords > countWords(bestUnderCap)) {
-      bestUnderCap = candidate;
-    }
-  }
-
-  if (bestUnderCap) return bestUnderCap;
-  const fallbackSection = buildCouncilEvidenceSection(retrieval, 3, COUNCIL_REQUIRED_SOURCES);
-  return trimCouncilAnswerToWordCap(fallbackSection ? `${baseAnswer.trim()}\n\n${fallbackSection}` : baseAnswer);
-}
-
-function buildCouncilEvidenceSection(
-  retrieval: BucketedRetrievalResult,
-  factWordLimit: number,
-  sourceTarget: number,
-): string {
-  const bullets = retrieval.enrichedResults
-    .map((source, index) => {
-      const sourceId = index + 1;
-      const fact = compactCouncilEvidenceFact([source.title, source.snippet, source.fullText].filter(Boolean).join(" "), factWordLimit);
-      if (!fact || !source.url) return null;
-      return `- ${fact} [Source ${sourceId}](${source.url})`;
-    })
-    .filter((line): line is string => Boolean(line))
-    .slice(0, sourceTarget);
-  if (bullets.length === 0) return "";
-  return [
-    "## Additional Evidence Bullets",
-    "Debate-ready cited points from the evidence registry:",
-    ...bullets,
-  ].join("\n");
-}
-
-function compactCouncilEvidenceFact(value: string, maxWords: number): string {
-  const cleaned = value
-    .replace(/\s+/g, " ")
-    .replace(/\b(JavaScript must be enabled|Decrease Font Size|Increase Font Size|Normal Theme|Sitemap|Advance Search)\b.*$/i, "")
-    .trim();
-  return truncateWords(cleaned || "Retrieved evidence record", maxWords);
-}
-
-function extractCouncilMarkdownSourceIds(answer: string): Set<number> {
-  const ids = new Set<number>();
-  for (const match of answer.matchAll(/\[Source\s+(\d+)\]/gi)) {
-    const id = Number.parseInt(match[1] ?? "", 10);
-    if (Number.isInteger(id) && id > 0) ids.add(id);
-  }
-  return ids;
-}
-
-function countWords(value: string): number {
-  const trimmed = value.trim();
-  return trimmed ? trimmed.split(/\s+/).length : 0;
-}
-
-function truncateWords(value: string, maxWords: number): string {
-  const words = value.trim().split(/\s+/).filter(Boolean);
-  if (words.length <= maxWords) return words.join(" ");
-  return `${words.slice(0, maxWords).join(" ")}...`;
-}
-
-function trimCouncilAnswerToWordCap(answer: string): string {
-  if (countWords(answer) <= COUNCIL_MAX_FINAL_WORDS) return answer;
-  const notice = "\n\n## Trim Notice\nMode word-cap of 5500 words enforced.";
-  const noticeWords = countWords(notice);
-  return `${truncateWords(answer, Math.max(1, COUNCIL_MAX_FINAL_WORDS - noticeWords))}${notice}`;
-}
-
-function buildCouncilMetadata(identity: ResearchRunIdentity, session: CouncilSession, retrieval: BucketedRetrievalResult, finalAnswer: string): PipelineMetadata {
-  const citedCouncilSourceIds = extractCouncilMarkdownSourceIds(finalAnswer);
-  const finalUniqueCitedSources = citedCouncilSourceIds.size;
-  const citationEligibleSources = retrieval.citationEligibleEstimate;
-  const passedStrict = session.terminalStatus === "completed" && finalUniqueCitedSources >= COUNCIL_REQUIRED_SOURCES;
-  const passedWithSourceGaps = session.terminalStatus === "completed_with_source_gaps"
-    || (session.terminalStatus === "completed" && finalUniqueCitedSources > 0 && finalUniqueCitedSources < COUNCIL_REQUIRED_SOURCES);
-  const sourceContractStatus = passedStrict ? "passed" : passedWithSourceGaps ? "passed_with_source_gaps" : "failed";
-  return {
-    runId: identity.runId,
-    requestId: identity.requestId,
-    conversationId: identity.conversationId,
-    assistantMessageId: identity.assistantMessageId,
-    queryHash: identity.queryHash,
-    researchMode: "council",
-    terminalStatus: session.terminalStatus,
-    coreGenerationUsed: false,
-    legacyFallbackUsed: false,
-    liveRetrievalUsed: true,
-    sourceContract: {
-      requiredSources: COUNCIL_REQUIRED_SOURCES,
-      citationEligibleSources,
-      finalUniqueCitedSources,
-      passedStrict,
-      passedWithSourceGaps,
-      passed: passedStrict || passedWithSourceGaps,
-      status: sourceContractStatus,
-      reason: passedStrict
-        ? "Council completed with at least one Council Seal."
-        : passedWithSourceGaps
-          ? "Council completed with partial councillor/source gaps."
-          : "Council could not establish enough grounded councillor evidence.",
-    },
-    sourceGapReport: retrieval.sourceGapReport,
-    citationStatus: {
-      finalUniqueCitedSources,
-      totalLinkedCitations: finalUniqueCitedSources,
-      citedSourceIds: [...citedCouncilSourceIds].sort((a, b) => a - b),
-      citationCoverage: citationEligibleSources > 0 ? finalUniqueCitedSources / citationEligibleSources : 0,
-      invalidCitations: [],
-      citedBuckets: [...new Set(retrieval.enrichedResults.flatMap((source) => source.bucketIds))],
-    },
-    councilSession: session,
-    sources: retrieval.enrichedResults.map((source, index) => ({
-      sourceId: index + 1,
-      title: source.title,
-      url: source.url,
-      sourceType: source.sourceClass,
-      bucketIds: source.bucketIds,
-      cited: citedCouncilSourceIds.has(index + 1),
-      discoveredBy: source.discoveredBy,
-      extractedBy: source.extractionProvider,
-      fallbackExtractionUsed: source.fallbackExtractionUsed,
-    })),
-  };
-}
-
-export const __councilTestHooks = {
-  buildCouncilFinalAnswer,
-  buildCouncilMetadata,
-};
 
 // â”€â”€â”€ Multi-model search handler â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -4627,139 +4151,37 @@ async function handleMultiSearch(
 }
 
 router.post("/anthropic/conversations/:id/messages", async (req, res) => {
-  // Guard: max message content 32KB
-  const rawContent = req.body?.content;
-  if (typeof rawContent === "string" && rawContent.length > 32_768) {
-    res.status(400).json({ error: "Message content exceeds 32KB limit.", code: "content_too_large" });
+  const preflight = await loadMessageRouteContext(req, res);
+  if (!preflight.ok) {
+    res.status(preflight.status).json(preflight.body);
     return;
   }
 
-  const paramsParsed = SendAnthropicMessageParams.safeParse({ id: Number(req.params.id) });
-  const bodyParsed = SendAnthropicMessageBody.safeParse(req.body);
-  if (!paramsParsed.success || !bodyParsed.success) { res.status(400).json({ error: "Invalid request" }); return; }
-
-  const conversationId = paramsParsed.data.id;
-  const ownerUserId = getRequestOwnerId(req);
-  const userContent = bodyParsed.data.content;
-  const mode = bodyParsed.data.mode ?? "normal";
-  const freshnessDecision = detectFreshnessNeeded(userContent, mode);
-  const freshnessResearchMode: ResearchMode | null =
-    (mode === "normal" || mode === "rhetorics" || mode === "drafting") && freshnessDecision.needed
-      ? "fast_research"
-      : null;
-  const routeMode = freshnessResearchMode ?? mode;
-  const effectiveResearchMode = freshnessResearchMode ?? normalizeEffectiveResearchMode(userContent, mode, bodyParsed.data.researchMode);
-  const rhetoricsType = (bodyParsed.data.rhetoricsType ?? null) as string | null;
-  const rawCreativity = bodyParsed.data.creativity;
-  const creativity = typeof rawCreativity === "number" ? Math.max(0, Math.min(1, rawCreativity)) : 0.5;
-  const temperature = 0.4 + creativity * 0.9;
-  const rawSystemPrompt = typeof req.body.systemPrompt === "string" ? req.body.systemPrompt : "";
-  const userSystemPrompt = rawSystemPrompt.slice(0, 4000);
-  const DEFAULT_GROQ_MODEL = "groq/llama-3.3-70b-versatile";
-  const autoFallback = req.body.autoFallback === true;
-  const suppliedNormalModel = typeof req.body.normalModel === "string" ? req.body.normalModel.trim() : "";
-  let rawNormalModel = suppliedNormalModel || DEFAULT_GROQ_MODEL;
-  try {
-    parseProviderModelId(rawNormalModel);
-  } catch {
-    res.status(400).json({
-      error: {
-        code: "INVALID_MODEL_PREFIX",
-        message: "Unrecognized model prefix. Expected groq/, openrouter/, nvidia/, gemini/, github/, ollama/.",
-      },
-    });
-    return;
-  }
-  const rawWebModels: string[] = [];
-  if (Array.isArray(req.body.webModels)) {
-    for (const model of req.body.webModels) {
-      if (typeof model !== "string" || !model.trim()) continue;
-      try {
-        parseProviderModelId(model.trim());
-        rawWebModels.push(model.trim());
-      } catch {
-        res.status(400).json({
-          error: {
-            code: "INVALID_MODEL_PREFIX",
-            message: "Unrecognized model prefix. Expected groq/, openrouter/, nvidia/, gemini/, github/, ollama/.",
-          },
-        });
-        return;
-      }
-    }
-  }
-  const effectiveWebModels = rawWebModels.length > 0 ? rawWebModels : [rawNormalModel];
-  const TIMEOUT_CONFIG = {
-    normal: 2 * 60 * 1000,
-    web_search: 5 * 60 * 1000,
-    deep_research: 15 * 60 * 1000,
-    fast_research: 8 * 60 * 1000,
-    council: 30 * 60 * 1000,
-    rhetorics: 5 * 60 * 1000,
-    drafting: 5 * 60 * 1000,
-  } as const;
-  const STREAM_TIMEOUT_MS = parseInt(process.env.STREAM_TIMEOUT_MS ?? "", 10)
-    || TIMEOUT_CONFIG[routeMode as keyof typeof TIMEOUT_CONFIG]
-    || 5 * 60 * 1000;
-
-  // Pre-flight DB operations wrapped in try/catch to handle errors before SSE setup
-  let convo, archive, archiveContext, userMessage, assistantMessage, combinedSystemPrompt;
-  try {
-    convo = await getConversationById(conversationId, ownerUserId);
-    if (!convo) { res.status(404).json({ error: "Conversation not found" }); return; }
-    const archiveId = convo.archive_id ?? null;
-    archive = archiveId ? await getArchiveById(archiveId, ownerUserId) : null;
-    archiveContext = archiveId ? await getArchiveContext(archiveId) : null;
-    const archiveTopic = archive?.topic?.trim() || "";
-    const archiveSummary = archiveContext?.summary?.trim() || "";
-    combinedSystemPrompt = composeAnthropicSystemPrompt({
-      archiveTopic,
-      archiveSummary,
-      userSystemPrompt: rawSystemPrompt,
-    });
-
-    userMessage = await createMessage(conversationId, "user", userContent);
-    assistantMessage = isResearchRouteMode(routeMode)
-      ? await createMessage(
-          conversationId,
-          "assistant",
-          freshnessResearchMode
-            ? "Freshness-sensitive research run started. Waiting for live-source output..."
-            : "Research run started. Waiting for streamed output...",
-        )
-      : undefined;
-  } catch (dbErr) {
-    req.log?.error?.({ err: dbErr }, "Pre-flight DB error");
-    res.status(503).json({ error: "Database unavailable", code: "db_error" });
-    return;
-  }
-  
-  const archiveId = convo.archive_id ?? null;
-  const archiveTopic = archive?.topic?.trim() || "";
-  const archiveSummary = archiveContext?.summary?.trim() || "";
-  const requestId = `req_${Date.now().toString(36)}_${randomUUID().slice(0, 8)}`;
-  const runId = `run_${Date.now().toString(36)}_${randomUUID().slice(0, 8)}`;
-  const runIdentity: ResearchRunIdentity = {
-    runId,
-    requestId,
+  const {
     conversationId,
-    userMessageId: userMessage?.id,
-    assistantMessageId: assistantMessage?.id,
-    queryHash: queryHashFor(userContent),
-    researchMode: effectiveResearchMode,
-    archiveId: archiveId ?? undefined,
-    createdAt: new Date().toISOString(),
-  };
-
-  const history = await getMessagesByConversationId(conversationId);
-  const MAX_HISTORY = 20;
-  const trimmedHistory = history.length > MAX_HISTORY
-    ? history.slice(history.length - MAX_HISTORY)
-    : history;
-  const chatMessages = trimmedHistory.map((m) => ({
-    role: m.role as "user" | "assistant",
-    content: m.content,
-  }));
+    userContent,
+    mode,
+    freshnessDecision,
+    freshnessResearchMode,
+    routeMode,
+    effectiveResearchMode,
+    selectedResearchMode,
+    rhetoricsType,
+    temperature,
+    userSystemPrompt,
+    combinedSystemPrompt,
+    autoFallback,
+    rawNormalModel,
+    effectiveWebModels,
+    streamTimeoutMs: STREAM_TIMEOUT_MS,
+    archiveId,
+    archiveTopic,
+    archiveSummary,
+    assistantMessage,
+    runIdentity,
+    chatMessages,
+  } = preflight.context;
+  const { requestId, runId } = runIdentity;
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
@@ -4817,7 +4239,7 @@ router.post("/anthropic/conversations/:id/messages", async (req, res) => {
   };
   activeResearchRunsByConversation.set(conversationId, activeRun);
   sendRunEvent("run_started", {
-    selectedResearchMode: bodyParsed.data.researchMode ?? null,
+    selectedResearchMode: selectedResearchMode ?? null,
     inferredResearchMode: inferResearchMode(userContent, mode === "web_search" ? "web_search" : "deep_research"),
     freshnessDecision,
     freshnessAutoRouted: freshnessResearchMode !== null,
