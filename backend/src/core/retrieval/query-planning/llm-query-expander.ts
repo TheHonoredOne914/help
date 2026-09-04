@@ -1,6 +1,7 @@
 import type { AgendaContract } from "../../agenda/agenda-contract.js";
 import type { ResearchMode } from "../../config/research-mode.js";
 import type { SourceBucketId } from "../source-buckets.js";
+import type { ProviderName } from "../../providers/provider-types.js";
 import { buildFallbackQueriesForBucket } from "./fallback-query-builder.js";
 import { filterResolvedQueryDrift } from "./query-drift-filter.js";
 import type { ProviderJsonLikeRouter, QueryCandidate, QueryExpansionOptions } from "./types.js";
@@ -16,8 +17,11 @@ export async function expandQueriesWithLlm(
   mode: ResearchMode,
   options: QueryExpansionOptions,
 ): Promise<{ queries: QueryCandidate[]; rejected: string[] }> {
-  if (!options.providerRouter || !options.providerName || !options.model || (mode !== "deep_research" && mode !== "council")) {
-    return deterministicFallback(contract);
+  if (!options.providerRouter || !options.providerName || !options.model) {
+    return { queries: [], rejected: [] };
+  }
+  if (mode !== "deep_research" && mode !== "council") {
+    return { queries: [], rejected: [] };
   }
   try {
     const json = await requestExpansion(options.providerRouter, options.providerName, options.model, contract, mode, options.timeoutMs);
@@ -41,7 +45,7 @@ function deterministicFallback(contract: AgendaContract, rejected: string[] = []
 
 async function requestExpansion(
   providerRouter: ProviderJsonLikeRouter,
-  providerName: string,
+  providerName: ProviderName,
   model: string,
   contract: AgendaContract,
   mode: ResearchMode,

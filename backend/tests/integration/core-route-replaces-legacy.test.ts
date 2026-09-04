@@ -5,14 +5,14 @@ import path from "node:path";
 
 const root = path.resolve(process.cwd(), "..");
 
-test("real research route gates legacy multi-search behind explicit legacy flags", () => {
+test("real research route always uses the core pipeline", () => {
   const service = fs.readFileSync(path.join(root, "backend/src/services/anthropic-service.ts"), "utf8");
-  const coreGate = service.indexOf("USE_CORE_RESEARCH_ROUTE");
-  const legacyGate = service.indexOf("USE_LEGACY_RESEARCH_ROUTE");
-  const legacyCall = service.indexOf("await handleMultiSearch");
-  assert.ok(coreGate > 0);
-  assert.ok(legacyGate > coreGate);
-  assert.ok(legacyCall > legacyGate);
+  assert.doesNotMatch(service, /USE_CORE_RESEARCH_ROUTE/);
+  assert.doesNotMatch(service, /USE_LEGACY_RESEARCH_ROUTE/);
+  assert.doesNotMatch(service, /handleMultiSearch/);
+  assert.match(service, /if \(isResearchRouteMode\(routeMode\)\)/);
+  assert.match(service, /runResearchPipeline\(/);
   assert.match(service, /generationMode:\s*"model"/);
-  assert.doesNotMatch(service.slice(coreGate, legacyGate), /handleMultiSearch/);
+  assert.match(service, /fallbackExplicitlyAllowed:\s*false/);
+  assert.match(service, /Research modes must use the core pipeline/);
 });

@@ -22,6 +22,7 @@ import { getLimitProfile } from "../../providers/limits/provider-limit-registry.
 import { estimateTokens } from "../../generation/prompt-budget.js";
 import {
   ROLE_GENERATION_SCHEMA_VERSION,
+  type HealthyProviderLookupInput,
   type ModelRoleRunnerInput,
   type ModelRoleSourceUsageInput,
   type RoleGenerationPayload,
@@ -186,8 +187,8 @@ export async function runModelRoleForSourceUsage(input: ModelRoleSourceUsageInpu
   return buildFailureOutput(input, bestItems, ["Source usage validation failed after role-specific retry, smaller batches, and healthy provider fallback"], providerErrors, "fail_pipeline", retries, providerUsed, modelUsed);
 }
 
-export function getHealthyGenerationProviders(input: ModelRoleSourceUsageInput): Array<{ providerName: ProviderName; model: string }> {
-  const router = input.providerRouter as ({ hasProvider?: (name: ProviderName) => boolean }) | undefined;
+export function listHealthyProvidersForRole(input: HealthyProviderLookupInput): Array<{ providerName: ProviderName; model: string }> {
+  const router = input.providerRouter;
   if (!router) return [];
   const candidates = [
     ...(input.providerName && input.model ? [{ providerName: input.providerName, model: input.model }] : []),
@@ -199,7 +200,7 @@ export function getHealthyGenerationProviders(input: ModelRoleSourceUsageInput):
     if (seen.has(key)) return false;
     seen.add(key);
     if (input.providerRunState?.shouldSkipModel(candidate.providerName, candidate.model)) return false;
-    return typeof router.hasProvider === "function" ? router.hasProvider(candidate.providerName) : candidate.providerName === input.providerName;
+    return router.hasProvider(candidate.providerName);
   });
   const summary = getHealthyProvidersForResearch({
     selectedProvider: input.providerName,
@@ -213,6 +214,10 @@ export function getHealthyGenerationProviders(input: ModelRoleSourceUsageInput):
     return routerAvailable.filter((candidate) => allowed.has(`${candidate.providerName}/${candidate.model}`));
   }
   return routerAvailable;
+}
+
+export function getHealthyGenerationProviders(input: ModelRoleSourceUsageInput): Array<{ providerName: ProviderName; model: string }> {
+  return listHealthyProvidersForRole(input);
 }
 
 function buildDeterministicEvidenceOutput(input: ModelRoleSourceUsageInput, providerErrors: SafeProviderError[], retries: number, providerUsed?: string, modelUsed?: string): ModelRoleOutput {

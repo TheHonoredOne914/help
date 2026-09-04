@@ -1,5 +1,7 @@
 import type { AgendaContract, AgendaLens, TopicType } from "../../agenda/agenda-contract.js";
 import type { ResearchMode } from "../../config/research-mode.js";
+import type { ProviderName } from "../../providers/provider-types.js";
+import type { ProviderRouter } from "../../providers/provider-router.js";
 import type { SourceBucket, SourceBucketId } from "../source-buckets.js";
 
 export type QueryPriority = "domain_targeted" | "broad_discovery" | "top_up";
@@ -89,22 +91,11 @@ export interface QueryPlanningContext {
   keywords: string;
 }
 
-export interface ProviderJsonLikeRouter {
-  completeJson(providerName: string, request: {
-    model: string;
-    roleName?: string;
-    messages: Array<{ role: "system" | "user" | "assistant"; content: string }>;
-    temperature?: number;
-    maxTokens?: number;
-    timeoutMs?: number;
-    retries?: number;
-    metadata?: Record<string, unknown>;
-  }): Promise<{ json: unknown; content?: string; provider?: string; model?: string }>;
-}
+export type ProviderJsonLikeRouter = Pick<ProviderRouter, "completeJson">;
 
 export interface QueryExpansionOptions {
   providerRouter?: ProviderJsonLikeRouter;
-  providerName?: string;
+  providerName?: ProviderName;
   model?: string;
   timeoutMs?: number;
 }

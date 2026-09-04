@@ -22,16 +22,15 @@ test("web search deduplicates in-flight requests and gates gov.in fallback", () 
   assert.match(source, /const shouldRunGovFallback =/);
 });
 
-test("sequential research batches run all planned roles with small model counts", () => {
-  const source = readRepoFile("backend/src/routes/anthropic.ts");
-  const executeSequentialBatches = source.slice(source.indexOf("async function executeSequentialBatches"));
+test("legacy sequential research batches are removed from the research route", () => {
+  const route = readRepoFile("backend/src/routes/anthropic.ts");
+  const service = readRepoFile("backend/src/services/anthropic-service.ts");
 
-  assert.doesNotMatch(source, /"indiankanoon "\s*\+\s*q\s*\+\s*" case law"/);
-  assert.match(source, /type ResearchRole = "data_analyst" \| "legal_researcher" \| "policy_analyst" \| "current_affairs"/);
-  assert.doesNotMatch(executeSequentialBatches, /needsLegalPrecedents && n >= 2/);
-  assert.doesNotMatch(executeSequentialBatches, /needsPolicyAnalysis && n >= 3/);
-  assert.match(executeSequentialBatches, /batchName: "Current Affairs", role: "current_affairs"/);
-  assert.match(executeSequentialBatches, /role === "current_affairs"\s*\?\s*planned\.current_affairs/);
+  assert.doesNotMatch(route, /async function executeSequentialBatches/);
+  assert.doesNotMatch(service, /async function executeSequentialBatches/);
+  assert.doesNotMatch(service, /async function handleMultiSearch/);
+  assert.match(service, /runResearchPipeline\(/);
+  assert.match(service, /isResearchRouteMode\(routeMode\)/);
 });
 
 test("frontend uses backend citationStatus as the source badge truth", () => {

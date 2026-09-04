@@ -17,12 +17,13 @@ test("real UI route sends researchMode and run-scopes stream events", () => {
   assert.doesNotMatch(chatArea, /type ChatMode = "normal" \| "web_search" \| "deep_research"/);
 });
 
-test("backend research route defaults to core pipeline instead of legacy multi-search", () => {
+test("backend research route uses the core pipeline and has no legacy multi-search", () => {
   const service = fs.readFileSync(path.join(root, "backend/src/services/anthropic-service.ts"), "utf8");
-  const coreRouteIndex = service.indexOf("USE_CORE_RESEARCH_ROUTE");
-  const legacyRouteIndex = service.indexOf("await handleMultiSearch");
-  assert.ok(coreRouteIndex > 0, "core route flag must exist");
-  assert.ok(legacyRouteIndex > coreRouteIndex, "legacy multi-search must be after the core route gate");
+  assert.doesNotMatch(service, /USE_CORE_RESEARCH_ROUTE/);
+  assert.doesNotMatch(service, /USE_LEGACY_RESEARCH_ROUTE/);
+  assert.doesNotMatch(service, /handleMultiSearch/);
+  assert.match(service, /if \(isResearchRouteMode\(routeMode\)\)/);
+  assert.match(service, /runResearchPipeline\(/);
   assert.match(service, /assistantMessageId/);
   assert.match(service, /run_started/);
 });
