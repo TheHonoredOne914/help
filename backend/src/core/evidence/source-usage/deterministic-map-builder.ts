@@ -50,11 +50,19 @@ export function buildDeterministicUsageItemFromSource(source: EvidenceSource): S
 }
 
 function isDeterministicCountCandidate(source: EvidenceSource): boolean {
-  if (source.extractionQuality === "snippet" || source.extractionQuality === "failed") return false;
+  if (source.extractionQuality === "failed") return false;
   if (source.citationStrength === "strong" || source.citationStrength === "medium") return true;
-  return Boolean(source.fullText?.trim())
-    && source.authorityScore >= 65
-    && source.keyFacts.some((fact) => fact.trim() && !/^title-only relevance:/i.test(fact.trim()));
+  const texts = [
+    ...source.keyFacts,
+    source.snippet,
+    source.fullText,
+    ...source.topChunks.map((chunk) => chunk.text),
+  ];
+  return source.authorityScore >= 60
+    && texts.some((value) => {
+      const text = value?.trim() ?? "";
+      return text.length >= 40 && !/^title-only relevance:/i.test(text);
+    });
 }
 
 function usageItemFromCard(card: EvidenceCard): SourceUsageMapItem {
@@ -106,11 +114,19 @@ function usageItemFromCard(card: EvidenceCard): SourceUsageMapItem {
 }
 
 function isCardCountCandidate(card: EvidenceCard): boolean {
-  if (card.extractionQuality === "snippet" || card.extractionQuality === "failed") return false;
+  if (card.extractionQuality === "failed") return false;
   if (card.citationStrength === "strong" || card.citationStrength === "medium") return true;
-  return Boolean(card.contentPreview?.trim())
-    && card.relevanceScore >= 65
-    && card.keyFacts.some((fact) => fact.trim() && !/^title-only relevance:/i.test(fact.trim()));
+  const texts = [
+    card.contentPreview,
+    ...card.keyFacts,
+    ...(card.topChunks ?? []).map((chunk) => chunk.text),
+    card.debateUse,
+  ];
+  return card.relevanceScore >= 60
+    && texts.some((value) => {
+      const text = value?.trim() ?? "";
+      return text.length >= 40 && !/^title-only relevance:/i.test(text);
+    });
 }
 
 function baseCardItem(card: EvidenceCard, fields: Pick<SourceUsageMapItem, "usageType" | "confidence"> & Partial<SourceUsageMapItem>): SourceUsageMapItem {

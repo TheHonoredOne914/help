@@ -2,7 +2,7 @@ import { buildAgendaContract, type AgendaContract } from "../agenda/agenda-contr
 import { isArchiveContextSafeForAgenda } from "../agenda/archive-safety.js";
 import { routeQueryAgainstWorkspace, type QueryRoutingResult } from "../archive/context-router.js";
 import { generateResearchAngles, type ResearchAngle } from "../archive/research-angle-engine.js";
-import { agendaOutputDepthForMode, inferResearchMode, type ResearchMode } from "../config/research-mode.js";
+import { agendaOutputDepthForMode, inferResearchMode, RESEARCH_LIMITS, type ResearchMode } from "../config/research-mode.js";
 import { getSourceUsagePolicy } from "../config/source-usage-policy.js";
 import { generateCoreResearchAnswer, type CoreResearchAnswerResult } from "../generation/core-answer-generator.js";
 import { buildClaimGraph, buildLegacyClaimGraphContext, type ClaimGraph } from "../evidence/claim-graph.js";
@@ -227,7 +227,7 @@ export async function runResearchPipeline(input: ResearchPipelineInput): Promise
   latencyBudget.startStage("retrieval");
   flushLatencyEvents();
   throwIfAborted();
-  const rawSources = input.preloadedSources ?? await retrieveLiveSourcesIfNeeded(input, mode, queryPlan, emit, latencyBudget);
+  const rawSources = input.preloadedSources ?? await retrieveLiveSourcesIfNeeded(input, mode, queryPlan, emit, latencyBudget, researchAngles);
   throwIfAborted();
   latencyBudget.endStage("retrieval");
   flushLatencyEvents();
@@ -309,6 +309,80 @@ export async function runResearchPipeline(input: ResearchPipelineInput): Promise
     contradictions: claimGraph.contradictions?.length ?? 0,
     phase: "post_source_usage",
   });
+
+  const modeFloor = RESEARCH_LIMITS[mode].minCitationEligibleSources;
+  const citationEligibleForGeneration = evidenceRegistry.getCitationEligibleCount();
+  if (citationEligibleForGeneration < modeFloor) {
+    const gapReport = sourceGapReport ?? buildSourceGapReport(
+      agendaContract,
+      evidenceRegistry,
+      queryPlan.queries.map((query) => query.query),
+      [],
+      [],
+      filterRejections,
+    ) ?? {
+      requiredUniqueSources: modeFloor,
+      availableCitationEligibleSources: citationEligibleForGeneration,
+      failedBuckets: [],
+      weakBuckets: [],
+      attemptedQueries: queryPlan.queries.map((query) => query.query),
+      providerErrors: [],
+      enrichmentFailures: [],
+      filterRejections,
+      explanation: `Fewer than ${modeFloor} citation-eligible sources were available after filtering.`,
+      repairAttempted: false,
+    };
+    sourceGapReport = gapReport;
+    const gapAnswer = buildInsufficientSourcesGapAnswer(agendaContract, evidenceRegistry, gapReport, modeFloor);
+    const citationReport = validateCitations(gapAnswer, evidenceRegistry, agendaContract);
+    const qualityGate = runThesisQualityGate(gapAnswer, agendaContract, evidenceRegistry, {
+      uniqueCitedSourceIds: citationReport.sourceIdsActuallyUsed,
+      citedBucketIds: [],
+      modelRoleOutputs,
+      sourceGapReport: gapReport,
+    });
+    const sourceContract = evaluateSourceContract({
+      mode,
+      requiredSources: agendaContract.minimumUniqueCitedSources,
+      citationEligibleSources: citationEligibleForGeneration,
+      finalUniqueCitedSources: citationReport.uniqueCitedSourceCount,
+      bucketCoverage: evidenceRegistry.getBucketCoverage(),
+      requiredBuckets: agendaContract.requiredSourceBuckets.map((bucket) => bucket.bucketId),
+      sourceGapReport: gapReport,
+      categoryScores: qualityGate.categoryScores,
+    });
+    emit("pipeline_failed", {
+      code: "INSUFFICIENT_CITATION_ELIGIBLE_SOURCES",
+      reason: `Insufficient citation-eligible sources for ${mode}: ${citationEligibleForGeneration}/${modeFloor}.`,
+      availableSources: citationEligibleForGeneration,
+      requiredSources: modeFloor,
+      sourceGapReport: gapReport,
+      sourceContract,
+    });
+    emitTerminal("failed", {
+      code: "INSUFFICIENT_CITATION_ELIGIBLE_SOURCES",
+      reason: `Insufficient citation-eligible sources for ${mode}: ${citationEligibleForGeneration}/${modeFloor}.`,
+      sourceGapReport: gapReport,
+      sourceContract,
+      citations: citationReport.uniqueCitedSourceCount,
+    });
+    return {
+      agendaContract,
+      evidenceRegistry,
+      modelRoleOutputs,
+      sourceUsageAggregate,
+      citationReport,
+      qualityGate,
+      sourceGapReport: gapReport,
+      finalAnswer: gapAnswer,
+      usedCoreGeneration: false,
+      usedLegacyFallback: false,
+      archiveRouting,
+      researchAngles,
+      divisionOutputs: new Map(),
+      terminalStatus: "failed",
+    };
+  }
 
   const useCoreGeneration = input.useCoreGeneration ?? process.env.USE_CORE_GENERATION !== "false";
   const compatibilityMode = input.emergencyCompatibilityMode ?? process.env.BESTDEL_EMERGENCY_COMPATIBILITY_MODE === "true";
@@ -631,8 +705,14 @@ async function runSourceUsageRoles(args: {
         requiredSources,
         minimumToProceed: Math.max(basePolicy.minimumToProceed, requiredSources),
       };
+  // generationMode controls core answer generation only. For fast_research, keep the
+  // deterministic source-usage default unless SOURCE_USAGE_ROLES_USE_MODEL opts in —
+  // otherwise smoke/API generationMode:"model" forces failing model SourceUsageMap paths
+  // and recovery only covers ~required+8 overlapping cards (union << 40 floor).
   const executionMode = resolveSourceUsageExecutionMode({
-    requestedMode: args.input.generationMode,
+    requestedMode: args.mode === "fast_research"
+      ? (process.env.SOURCE_USAGE_ROLES_USE_MODEL === "true" ? "model" : undefined)
+      : args.input.generationMode,
     liveRetrieval: args.input.liveRetrieval === true,
     providerRouter: args.input.providerRouter,
     providerName: args.input.providerName,
@@ -777,7 +857,7 @@ async function runSourceUsageRoles(args: {
     };
     const healthy = listHealthyProvidersForRole(healthInput);
     const healthyNames = healthy.map((provider) => provider.providerName);
-    const configured = (["groq", "openrouter", "gemini", "nvidia", "github", "cerebras"] as ProviderName[]).filter((providerName) => args.input.providerRouter?.hasProvider(providerName));
+    const configured = (["opencode", "groq", "openrouter", "gemini", "nvidia", "github", "cerebras"] as ProviderName[]).filter((providerName) => args.input.providerRouter?.hasProvider(providerName));
     args.emit("provider_health_checked", {
       healthyProviders: healthyNames,
       unhealthyProviders: configured.filter((providerName) => !healthyNames.includes(providerName as ProviderName)),
@@ -1094,10 +1174,11 @@ async function retrieveLiveSourcesIfNeeded(
   queryPlan: Awaited<ReturnType<typeof buildBucketedQueryPlanWithExpansion>>,
   emit: (type: PipelineEvent["type"], data?: Record<string, unknown>) => void,
   latencyBudget: LatencyBudgetManager,
+  researchAngles: ResearchAngle[] = [],
 ): Promise<Array<Partial<EvidenceSource> & { excerpt?: string }>> {
   const shouldLiveRetrieve = input.liveRetrieval ?? true;
   if (!shouldLiveRetrieve && input.allowMockRetrieval) {
-    const result = await runBucketedRetrieval(queryPlan, { ...(input.searchOptions ?? {}), live: false, mode, timeoutMs: latencyBudget.providerCallTimeoutMs, extractionTimeoutMs: latencyBudget.extractionTimeoutMs, maxConcurrency: latencyBudget.maxConcurrentSearches, abortSignal: input.signal });
+    const result = await runBucketedRetrieval(queryPlan, { ...(input.searchOptions ?? {}), live: false, mode, timeoutMs: latencyBudget.providerCallTimeoutMs, extractionTimeoutMs: latencyBudget.extractionTimeoutMs, maxConcurrency: latencyBudget.maxConcurrentSearches, abortSignal: input.signal, researchAngles });
     bridgeRetrievalEvents(result, emit);
     return result.enrichedResults.map(retrievalToEvidenceInput);
   }
@@ -1114,6 +1195,7 @@ async function retrieveLiveSourcesIfNeeded(
     enrichmentBudgetMs: input.searchOptions?.enrichmentBudgetMs ?? latencyBudget.enrichmentBudgetMs,
     maxConcurrency: input.searchOptions?.maxConcurrency ?? latencyBudget.maxConcurrentSearches,
     abortSignal: input.signal,
+    researchAngles,
     emit: (event) => {
       if (event.type in PIPELINE_RETRIEVAL_EVENT_MAP) {
         emit(PIPELINE_RETRIEVAL_EVENT_MAP[event.type], event.data ?? {});
@@ -1166,7 +1248,6 @@ function retrievalToEvidenceInput(source: Awaited<ReturnType<typeof runBucketedR
     fullText: source.fullText ?? null,
     bucketIds: source.bucketIds,
     sourceClass: source.sourceClass,
-    authorityScore: source.score,
     extractionQuality: source.extractionQuality ?? "snippet",
     discoveredBy: source.discoveredBy,
     extractionProvider: source.extractionProvider,
@@ -1195,6 +1276,31 @@ function isCitationEligibleRetrievalSource(source: Awaited<ReturnType<typeof run
       && source.score >= 55;
   }
   return Boolean(source.fullText?.trim() || source.snippet?.trim()) && source.score >= 40;
+}
+
+function buildInsufficientSourcesGapAnswer(
+  contract: AgendaContract,
+  registry: EvidenceRegistryCore,
+  sourceGapReport: SourceGapReport,
+  modeFloor: number,
+): string {
+  const available = registry.getCitationEligibleCount();
+  return [
+    "# Insufficient Sources",
+    "",
+    `Research could not proceed: only ${available} citation-eligible source${available === 1 ? "" : "s"} were available, but ${modeFloor} are required.`,
+    "",
+    "## SourceGapReport",
+    sourceGapReport.explanation,
+    `Available citation-eligible sources: ${sourceGapReport.availableCitationEligibleSources}.`,
+    `Required unique cited sources: ${sourceGapReport.requiredUniqueSources}.`,
+    `Failed buckets: ${sourceGapReport.failedBuckets.join(", ") || "none"}.`,
+    `Weak buckets: ${sourceGapReport.weakBuckets.join(", ") || "none"}.`,
+    "",
+    `Agenda: ${contract.normalizedAgenda}`,
+    "",
+    "This is not a completed research answer. Narrow the query, enable search providers, or use a mode with a reachable source floor.",
+  ].join("\n");
 }
 
 function buildDeterministicFallbackAnswer(contract: AgendaContract, registry: EvidenceRegistryCore, sourceGapReport?: SourceGapReport | null): string {

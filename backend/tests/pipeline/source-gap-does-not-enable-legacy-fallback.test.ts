@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { runResearchPipeline } from "../../src/core/pipeline/research-pipeline.js";
+import { fakePreloadedSources } from "./harness/fake-runtime.js";
 
 const sparseSources = [
   {
@@ -13,8 +14,9 @@ const sparseSources = [
   },
 ];
 
-test("SourceGapReport alone does not enable legacy fallback after core generation failure", async () => {
-  await assert.rejects(() => runResearchPipeline({
+test("below-floor sparse evidence fails closed without core generation", async () => {
+  let coreStarted = false;
+  const result = await runResearchPipeline({
     requestId: "source-gap-no-fallback",
     userQuery: "Deep research India parliamentary accountability 2026",
     mode: "deep_research",
@@ -22,10 +24,19 @@ test("SourceGapReport alone does not enable legacy fallback after core generatio
     liveRetrieval: false,
     forceCoreGenerationFailure: true,
     generationMode: "deterministic",
-  }), /legacy fallback is disabled|forced core generation failure/i);
+    emit: (event) => {
+      if (event.type === "core_generation_started") coreStarted = true;
+    },
+  });
+
+  assert.equal(coreStarted, false);
+  assert.equal(result.terminalStatus, "failed");
+  assert.equal(result.usedCoreGeneration, false);
+  assert.equal(result.usedLegacyFallback, false);
+  assert.match(result.finalAnswer, /Insufficient Sources/i);
 });
 
-test("explicit fallback produces cited deterministic fallback language", async () => {
+test("explicit fallback is skipped when citation-eligible floor is missed", async () => {
   const result = await runResearchPipeline({
     requestId: "source-gap-explicit-fallback",
     userQuery: "Deep research India parliamentary accountability 2026",
@@ -35,10 +46,30 @@ test("explicit fallback produces cited deterministic fallback language", async (
     useCoreGeneration: false,
     emergencyCompatibilityMode: true,
     generationMode: "deterministic",
+    legacyFallback: async () => "should not emit long form",
+  });
+
+  assert.equal(result.usedLegacyFallback, false);
+  assert.equal(result.terminalStatus, "failed");
+  assert.match(result.finalAnswer, /Insufficient Sources/i);
+});
+
+test("core generation failure still allows explicit legacy fallback when floor is met", async () => {
+  const result = await runResearchPipeline({
+    requestId: "floor-met-legacy-fallback",
+    userQuery: "Deep research India parliamentary accountability 2026",
+    mode: "deep_research",
+    preloadedSources: fakePreloadedSources(50) as any,
+    liveRetrieval: false,
+    forceCoreGenerationFailure: true,
+    useCoreGeneration: true,
+    generationMode: "deterministic",
+    legacyFallback: async ({ evidenceRegistry }) => {
+      const source = evidenceRegistry.getCitationEligibleSources()[0]!;
+      return `Cited fallback [Source ${source.id}](${source.url})`;
+    },
   });
 
   assert.equal(result.usedLegacyFallback, true);
-  assert.match(result.finalAnswer, /# Deterministic Cited Fallback/);
-  assert.match(result.finalAnswer, /\[Source 1\]\(https:\/\/sansad\.in\/example\)/);
-  assert.doesNotMatch(result.finalAnswer, /Legacy fallback answer retained/i);
+  assert.match(result.finalAnswer, /Cited fallback/i);
 });

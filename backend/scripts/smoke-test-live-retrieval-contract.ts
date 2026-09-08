@@ -1,7 +1,11 @@
+import "dotenv/config";
+import { normalizeApiKeys } from "../src/lib/normalize-keys.js";
 import { buildAgendaContract } from "../src/core/agenda/agenda-contract.js";
 import { buildBucketedQueryPlanWithExpansion } from "../src/core/retrieval/query-planner.js";
 import { runBucketedRetrieval } from "../src/core/retrieval/bucketed-retrieval.js";
 import type { ResearchMode } from "../src/core/config/research-mode.js";
+
+normalizeApiKeys();
 
 const mode = (process.env.LIVE_RESEARCH_MODE ?? "fast_research") as ResearchMode;
 const minimumSourceCount = Number(process.env.LIVE_MIN_SOURCES ?? (mode === "deep_research" ? 80 : mode === "council" ? 180 : 40));

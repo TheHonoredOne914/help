@@ -7,7 +7,11 @@ export function buildDeterministicRoleUsageItems(
   roleName = "evidence_extractor",
 ): SourceUsageMapItem[] {
   const required = Math.max(minimum, 0);
-  const target = required === 0 ? 0 : Math.min(cards.length, Math.max(required + 8, Math.ceil(required * 1.5)));
+  // Over-select enough of the assigned pool that rotated roles can union to the mode floor
+  // when many citation-eligible sources are snippet/limited rather than full-text.
+  const target = required === 0
+    ? 0
+    : Math.min(cards.length, Math.max(required + 8, Math.ceil(required * 1.5), Math.ceil(cards.length * 0.5)));
   return selectDeterministicCards(cards, target).map((card) => usageItemFromCard(card, roleName));
 }
 
@@ -115,15 +119,13 @@ function isWeakCard(card: EvidenceCard): boolean {
     card.debateUse,
   ].some((value) => {
     const text = typeof value === "string" ? value.trim() : "";
-    return Boolean(text) && !/^title-only relevance:/i.test(text) && !isBadEvidenceText(text);
+    // Require enough real text so snippet/Exa fallbacks can count without inventing claims.
+    return text.length >= 40 && !/^title-only relevance:/i.test(text) && !isBadEvidenceText(text);
   });
   return citationStrength === "ineligible"
-    || extractionQuality === "snippet"
     || extractionQuality === "failed"
     || !hasSubstantiveEvidence
-    || (citationStrength === "weak" && !hasSubstantiveEvidence)
-    || (card.limitedSource && !hasSubstantiveEvidence)
-    || (card.keyFacts ?? []).every((fact) => /^title-only relevance:/i.test(fact.trim()) || isBadEvidenceText(fact));
+    || (card.keyFacts ?? []).length > 0 && (card.keyFacts ?? []).every((fact) => /^title-only relevance:/i.test(fact.trim()) || isBadEvidenceText(fact));
 }
 
 function hasCountableFinding(card: EvidenceCard): boolean {

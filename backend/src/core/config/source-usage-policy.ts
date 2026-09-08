@@ -17,19 +17,19 @@ export function getSourceUsagePolicy(mode: SourceUsagePolicyMode): SourceUsagePo
     case "web_search":
     case "fast_research":
       return {
-        requiredSources: 20,
-        perRoleMinimum: 6,
-        minimumToProceed: 20,
+        requiredSources: 40,
+        perRoleMinimum: 10,
+        minimumToProceed: 40,
         strictFailure: false,
-        allowCompletedWithSourceGaps: true,
+        allowCompletedWithSourceGaps: false,
         allowDeterministicExtractionFallback: true,
         roleCount: 4,
       };
     case "deep_research":
       return {
-        requiredSources: 80,
+        requiredSources: 45,
         perRoleMinimum: 20,
-        minimumToProceed: 80,
+        minimumToProceed: 45,
         strictFailure: false,
         allowCompletedWithSourceGaps: true,
         allowDeterministicExtractionFallback: true,

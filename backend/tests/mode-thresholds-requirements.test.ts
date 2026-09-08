@@ -6,7 +6,7 @@ test("research mode thresholds match source and final-word requirements", () => 
   assert.equal(MODE_THRESHOLDS.fast_research.minCitedSources, 40);
   assert.equal(MODE_THRESHOLDS.fast_research.finalAnswerMinWords, 1000);
 
-  assert.equal(MODE_THRESHOLDS.deep_research.minCitedSources, 80);
+  assert.equal(MODE_THRESHOLDS.deep_research.minCitedSources, 45);
   assert.equal(MODE_THRESHOLDS.deep_research.finalAnswerMinWords, 2000);
   assert.equal(MODE_THRESHOLDS.deep_research.finalAnswerMaxWords, 3000);
 

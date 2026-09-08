@@ -262,8 +262,12 @@ function confidenceFor(item: SourceUsageMapItem, source: EvidenceSource, span: E
 function isCitationCreditEligible(item: SourceUsageMapItem, source: EvidenceSource, span: EvidenceSpan, confidence: ClaimLedgerItem["confidence"]): boolean {
   if (!source.citationEligible) return false;
   if (item.usageType === "relevant_but_weak") return false;
-  if (span.extractionQuality === "snippet" || span.extractionQuality === "title_only" || span.extractionQuality === "failed") return false;
+  if (span.extractionQuality === "title_only" || span.extractionQuality === "failed") return false;
   if ((source.citationStrength === "strong" || source.citationStrength === "medium") && (source.extractionQuality === "full" || source.extractionQuality === "partial")) return true;
+  // Citation-eligible snippet/limited sources may receive credit when usage already grounded.
+  if (span.extractionQuality === "snippet" || source.limitedSource || source.citationStrength === "weak") {
+    return Boolean(item.extractedClaim?.trim() || item.extractedNumber?.trim() || item.legalHolding?.trim() || item.supportedSection?.trim());
+  }
   if (confidence === "low") return false;
   return true;
 }

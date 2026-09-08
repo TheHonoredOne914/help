@@ -1,3 +1,4 @@
+import { multiKeyFetch } from "../../../lib/multi-key-fetch.js";
 import { fetchWithTimeout, safeResponseText, statusFromHttp, SearchProviderError } from "../search-provider-errors.js";
 import { normalizeSearchResults } from "../search-result-normalizer.js";
 import type { SearchProvider, SearchProviderHealth, SearchProviderOptions } from "../search-provider-types.js";
@@ -8,7 +9,7 @@ export const exaSearchProvider: SearchProvider = {
   async search(query, keys, options) {
     const key = keys.exa?.trim();
     if (!key) throw new SearchProviderError("exa", "missing_key", "Exa API key is not configured");
-    const response = await fetchWithTimeout(options.fetchFn ?? fetch, "https://api.exa.ai/search", {
+    const response = await fetchWithTimeout(options.fetchFn ?? multiKeyFetch, "https://api.exa.ai/search", {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-api-key": key },
       body: JSON.stringify({
@@ -18,6 +19,7 @@ export const exaSearchProvider: SearchProvider = {
         includeDomains: query.domains,
         excludeDomains: query.excludeDomains,
         startPublishedDate: query.freshnessDays ? new Date(Date.now() - query.freshnessDays * 86400000).toISOString().slice(0, 10) : undefined,
+        contents: { text: { maxCharacters: 2000 } },
       }),
       signal: options.abortSignal,
     }, options.timeoutMs ?? 12000);

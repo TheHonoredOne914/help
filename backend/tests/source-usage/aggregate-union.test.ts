@@ -119,19 +119,12 @@ test("fast_research: registry with only 22 eligible sources, union = all availab
 test("perRoleMinimum differs from requiredSources in policy config", () => {
   const fast = getSourceUsagePolicy("fast_research");
   assert.equal(fast.requiredSources, 40);
-  assert.equal(fast.perRoleMinimum, 12);
+  assert.equal(fast.perRoleMinimum, 10);
+  assert.equal(fast.allowCompletedWithSourceGaps, false);
 
   const deep = getSourceUsagePolicy("deep_research");
-  assert.equal(deep.requiredSources, 80);
+  assert.equal(deep.requiredSources, 45);
   assert.equal(deep.perRoleMinimum, 20);
-
-  const phd = getSourceUsagePolicy("deep_research");
-  assert.equal(phd.requiredSources, 30);
-  assert.equal(phd.perRoleMinimum, 12);
-
-  const full = getSourceUsagePolicy("council");
-  assert.equal(full.requiredSources, 30);
-  assert.equal(full.perRoleMinimum, 15);
 
   const council = getSourceUsagePolicy("council");
   assert.equal(council.requiredSources, 180);

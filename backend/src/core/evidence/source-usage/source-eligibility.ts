@@ -61,25 +61,37 @@ export function canCountForStrictSourceUsage(source: EvidenceSource, item: Sourc
   if (!COUNTING_USAGE_TYPES.has(item.usageType)) return false;
   if (!source.citationEligible || source.extractionQuality === "failed") return false;
   if (isTitleOnlySource(source)) return false;
-  if (source.extractionQuality === "snippet") return false;
-  if (source.limitedSource && !hasLegacyPartialEvidence(source)) return false;
-  return source.citationStrength === "strong" || source.citationStrength === "medium" || hasLegacyPartialEvidence(source);
+  if (source.citationStrength === "strong" || source.citationStrength === "medium") return true;
+  // Align with citation-eligibility bridge: weak/snippet/limited sources may count when they
+  // already carry substantive, non-title evidence (search/Exa snippet text) — never invented.
+  return hasSubstantiveCountableEvidence(source);
 }
 
 export function weakSourceWarning(roleName: string, item: SourceUsageMapItem, source: EvidenceSource): StructuredSourceUsageFailure | null {
   if (!COUNTING_USAGE_TYPES.has(item.usageType)) return null;
-  if (source.extractionQuality === "snippet") {
-    return sourceUsageFailure("snippet_source_not_counted", roleName, `Source ${source.id} is snippet-only and cannot satisfy strict usage.`, item, "warning");
-  }
-  if ((source.citationStrength === "weak" || source.limitedSource) && !hasLegacyPartialEvidence(source)) {
-    return sourceUsageFailure("weak_source_not_counted", roleName, `Source ${source.id} is weak/limited and cannot satisfy strict usage.`, item, "warning");
+  if (!canCountForStrictSourceUsage(source, item)) {
+    if (source.extractionQuality === "snippet") {
+      return sourceUsageFailure("snippet_source_not_counted", roleName, `Source ${source.id} is snippet-only and cannot satisfy strict usage.`, item, "warning");
+    }
+    if (source.citationStrength === "weak" || source.limitedSource) {
+      return sourceUsageFailure("weak_source_not_counted", roleName, `Source ${source.id} is weak/limited and cannot satisfy strict usage.`, item, "warning");
+    }
+  } else if (source.extractionQuality === "snippet" || source.limitedSource || source.citationStrength === "weak") {
+    return sourceUsageFailure("weak_source_not_counted", roleName, `Source ${source.id} is weak/limited/snippet; count only with grounded extracted text.`, item, "warning");
   }
   return null;
 }
 
-function hasLegacyPartialEvidence(source: EvidenceSource): boolean {
-  return (source.extractionQuality === "full" || source.extractionQuality === "partial")
-    && Boolean(source.fullText?.trim())
-    && source.authorityScore >= 65
-    && source.keyFacts.some((fact) => fact.trim() && !/^title-only relevance:/i.test(fact.trim()));
+function hasSubstantiveCountableEvidence(source: EvidenceSource): boolean {
+  if (source.authorityScore < 60) return false;
+  const texts = [
+    ...source.keyFacts,
+    source.snippet,
+    source.fullText,
+    ...source.topChunks.map((chunk) => chunk.text),
+  ];
+  return texts.some((value) => {
+    const text = value?.trim() ?? "";
+    return text.length >= 40 && !/^title-only relevance:/i.test(text);
+  });
 }

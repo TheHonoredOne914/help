@@ -18,9 +18,10 @@ export function normalizeEvidenceSourceInput(raw: RawEvidenceSourceInput): Evide
   const titleOnlyFacts = keyFacts.length > 0 && keyFacts.every((fact) => /^title-only relevance:/i.test(fact.trim()));
   const hasText = text.trim().length > 0;
   const limitedSource = Boolean(raw.limitedSource ?? ((!raw.fullText && !raw.excerpt) || extractionQuality === "snippet" || extractionQuality === "failed"));
+  // Floor aligns with general_media class authority (60).
   const citationEligible = Boolean(raw.citationEligible ?? true)
     && extractionQuality !== "failed"
-    && authorityScore >= 65
+    && authorityScore >= 60
     && hasText
     && !(titleOnlyFacts && text.trim().length < 160);
   const base: CompleteEvidenceSourceInput = {
@@ -149,7 +150,7 @@ function inferLimitations(raw: RawEvidenceSourceInput, text: string, extractionQ
   if (!raw.fullText && (raw.snippet || raw.excerpt)) limitations.push("Limited extraction; verify fine-grained claims before heavy use.");
   if (extractionQuality === "failed") limitations.push("Extraction failed.");
   if (!text.trim()) limitations.push("No extractable source text was available.");
-  if (authorityScore < 65) limitations.push("Weak relevance or lower authority.");
+  if (authorityScore < 60) limitations.push("Weak relevance or lower authority.");
   return limitations;
 }
 

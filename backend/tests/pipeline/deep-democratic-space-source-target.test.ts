@@ -14,15 +14,14 @@ test("deep democratic-space keeps restored deep source target instead of hidden 
 
   applyResearchModeSourceTargets(contract, "deep_research");
 
-  assert.equal(contract.minimumUniqueCitedSources, 80);
-  assert.equal(contract.minimumEvidenceCardsPerModel, 80);
+  assert.equal(contract.minimumUniqueCitedSources, 45);
+  assert.equal(contract.minimumEvidenceCardsPerModel, 20);
 });
 
 test("per-role source usage targets are mode aware", () => {
-  assert.equal(getPerRoleSourceUsageTarget("fast_research", getSourceUsagePolicy("fast_research"), 30), 30);
-  assert.equal(getPerRoleSourceUsageTarget("deep_research", getSourceUsagePolicy("deep_research"), 30), 30);
+  assert.equal(getPerRoleSourceUsageTarget("fast_research", getSourceUsagePolicy("fast_research"), 30), 10);
   assert.equal(getPerRoleSourceUsageTarget("deep_research", getSourceUsagePolicy("deep_research"), 30), 20);
-  assert.equal(getPerRoleSourceUsageTarget("council", getSourceUsagePolicy("council"), 30), 25);
+  assert.equal(getPerRoleSourceUsageTarget("council", getSourceUsagePolicy("council"), 30), 30);
 });
 
 test("fast and deep source requirements are minimums, not retrieval caps", () => {
@@ -41,13 +40,13 @@ test("fast and deep source requirements are minimums, not retrieval caps", () =>
   applyResearchModeSourceTargets(deepContract, "deep_research");
 
   assert.equal(fastContract.minimumUniqueCitedSources, 40);
-  assert.equal(deepContract.minimumUniqueCitedSources, 80);
+  assert.equal(deepContract.minimumUniqueCitedSources, 45);
   assert.equal(getSourceUsagePolicy("fast_research").minimumToProceed, 40);
-  assert.equal(getSourceUsagePolicy("deep_research").minimumToProceed, 80);
-  assert.equal(getSourceUsagePolicy("council").minimumToProceed, 30);
+  assert.equal(getSourceUsagePolicy("deep_research").minimumToProceed, 45);
+  assert.equal(getSourceUsagePolicy("council").minimumToProceed, 180);
 });
 
-test("mode source targets preserve stricter agenda contract floors", () => {
+test("mode source targets apply policy floors onto the agenda contract", () => {
   const contract = buildAgendaContract({
     requestId: "strict-contract-floor",
     originalUserQuery: "Deep research with stricter explicit source floor",
@@ -58,8 +57,8 @@ test("mode source targets preserve stricter agenda contract floors", () => {
 
   applyResearchModeSourceTargets(contract, "deep_research");
 
-  assert.equal(contract.minimumUniqueCitedSources, 120);
-  assert.equal(contract.minimumEvidenceCardsPerModel, 120);
+  assert.equal(contract.minimumUniqueCitedSources, 45);
+  assert.equal(contract.minimumEvidenceCardsPerModel, 20);
 });
 
 test("fast research honors explicit model source-usage mode when a provider is healthy", () => {
@@ -74,4 +73,19 @@ test("fast research honors explicit model source-usage mode when a provider is h
   });
 
   assert.equal(resolution.mode, "model");
+});
+
+test("fast research stays deterministic when generationMode is not an explicit source-usage override", () => {
+  const resolution = resolveSourceUsageExecutionMode({
+    requestedMode: undefined,
+    liveRetrieval: true,
+    providerRouter: { hasProvider: () => true } as any,
+    providerName: "groq",
+    model: "llama-3.3-70b-versatile",
+    allowSyntheticSourceUsage: false,
+    researchMode: "fast_research",
+  });
+
+  assert.equal(resolution.mode, "deterministic");
+  assert.match(resolution.reason, /deterministic source usage by default/i);
 });

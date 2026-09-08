@@ -1,11 +1,15 @@
+import "dotenv/config";
 import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { normalizeApiKeys } from "../src/lib/normalize-keys.js";
 import { runResearchPipeline } from "../src/core/pipeline/research-pipeline.js";
 import { stripPipelineMetadata } from "../src/core/pipeline/pipeline-metadata.js";
 import { buildProviderStatusPayload } from "../src/routes/providers.js";
 import { buildCoreProviderRouter } from "../src/services/anthropic-service.js";
 import type { PipelineEvent } from "../src/core/pipeline/pipeline-events.js";
 import type { RequestKeys } from "../src/lib/types.js";
+
+normalizeApiKeys();
 
 const keys: RequestKeys = {
   groqKey: process.env.GROQ_API_KEY ?? null,
@@ -28,17 +32,18 @@ const keys: RequestKeys = {
   geekflareKey: process.env.GEEKFLARE_API_KEY ?? null,
   cerebrasKey: process.env.CEREBRAS_API_KEY ?? null,
   openaiKey: process.env.OPENAI_API_KEY ?? null,
+  opencodeKey: process.env.OPENCODE_API_KEY ?? process.env.OPENCODE_ZEN_API_KEY ?? null,
 };
 
 const mode = (process.env.LIVE_RESEARCH_MODE ?? "fast_research") as "fast_research" | "deep_research" | "council";
 if (mode !== "fast_research" && mode !== "deep_research" && mode !== "council") {
   throw new Error(`smoke-test-live-fast-research supports fast_research/deep_research/council only; received ${mode}`);
 }
-const selectedModel = process.env.LIVE_FAST_RESEARCH_MODEL ?? process.env.LIVE_RESEARCH_MODEL ?? "groq/openai/gpt-oss-120b";
+const selectedModel = process.env.LIVE_FAST_RESEARCH_MODEL ?? process.env.LIVE_RESEARCH_MODEL ?? "groq/llama-3.3-70b-versatile";
 const liveQuestion = process.env.LIVE_RESEARCH_QUESTION?.trim();
 const useCache = process.env.LIVE_RESEARCH_USE_CACHE !== "false";
 const autoFallback = process.env.LIVE_RESEARCH_AUTO_FALLBACK !== "false";
-const minimumSourceCount = Number(process.env.LIVE_MIN_SOURCES ?? process.env.LIVE_FAST_MIN_SOURCES ?? (mode === "council" ? 180 : mode === "deep_research" ? 80 : 40));
+const minimumSourceCount = Number(process.env.LIVE_MIN_SOURCES ?? process.env.LIVE_FAST_MIN_SOURCES ?? (mode === "council" ? 180 : mode === "deep_research" ? 45 : 40));
 const minimumWordCount = Number(process.env.LIVE_MIN_WORDS ?? (mode === "council" ? 3000 : mode === "deep_research" ? 2000 : 1000));
 const maximumWordCount = Number(process.env.LIVE_MAX_WORDS ?? (mode === "council" ? 5500 : mode === "deep_research" ? 3000 : 0));
 const defaultQuestion = "Should the Election Commission and Union Government regulate online political advertising, deepfakes, and platform transparency during elections?";

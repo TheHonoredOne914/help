@@ -184,8 +184,9 @@ test("deterministic extraction fallback respects mode minimum instead of forcing
   });
 
   assert.equal(output.sourceUsageRequirementSatisfied, true);
-  assert.equal(output.sourceUsageMap.length, 3);
-  assert.equal(output.sourceUsageCount, 3);
+  // Deterministic fallback pads above the minimum: min(cards, max(min+8, ceil(min*1.5)))
+  assert.equal(output.sourceUsageMap.length, 10);
+  assert.equal(output.sourceUsageCount, 10);
 });
 
 test("deterministic fallback marks textless cards weak instead of creating fake claims", async () => {
@@ -213,15 +214,16 @@ test("deterministic fallback marks textless cards weak instead of creating fake 
   assert.equal(output.sourceUsageMap.every((item) => !item.extractedClaim), true);
 });
 
-test("source usage policy keeps web and fast lighter than phd/full", () => {
-  assert.equal(getSourceUsagePolicy("web_search").requiredSources, 10);
+test("source usage policy keeps web and fast lighter than council", () => {
+  assert.equal(getSourceUsagePolicy("web_search").requiredSources, 40);
   assert.equal(getSourceUsagePolicy("fast_research").strictFailure, false);
+  assert.equal(getSourceUsagePolicy("fast_research").allowCompletedWithSourceGaps, false);
   assert.equal(getSourceUsagePolicy("deep_research").allowCompletedWithSourceGaps, true);
-  assert.equal(getSourceUsagePolicy("deep_research").strictFailure, true);
-  assert.equal(getSourceUsagePolicy("council").minimumToProceed, 25);
+  assert.equal(getSourceUsagePolicy("deep_research").requiredSources, 45);
+  assert.equal(getSourceUsagePolicy("council").minimumToProceed, 180);
 });
 
-test("fast research can complete with source gaps when source usage role fails", async () => {
+test("fast research fails closed when eligible sources are below the mode floor", async () => {
   const { sources } = setup(5);
   const providerRouter = {
     hasProvider: () => true,
@@ -245,8 +247,11 @@ test("fast research can complete with source gaps when source usage role fails",
     });
 
     assert.ok(result.sourceGapReport);
-    assert.equal(result.modelRoleOutputs.some((role) => role.sourceUsageFailureReport), true);
-    assert.match(result.finalAnswer, /source gaps/i);
+    assert.equal(result.terminalStatus, "failed");
+    assert.equal(result.usedCoreGeneration, false);
+    assert.equal(result.usedLegacyFallback, false);
+    assert.match(result.finalAnswer, /Insufficient Sources/i);
+    assert.notEqual(result.terminalStatus, "completed_with_source_gaps");
   } finally {
     if (previous === undefined) delete process.env.SOURCE_USAGE_ROLES_USE_MODEL;
     else process.env.SOURCE_USAGE_ROLES_USE_MODEL = previous;
@@ -284,7 +289,6 @@ test("fast research uses deterministic source usage by default even when a provi
       liveRetrieval: true,
       useCoreGeneration: false,
       legacyFallback: async () => "Fast answer [Source 1](https://example.org/source-1)",
-      generationMode: "model",
       providerRouter,
       providerName: "gemini",
       model: "test",
@@ -293,6 +297,7 @@ test("fast research uses deterministic source usage by default even when a provi
 
     assert.equal(providerCalls, 0);
     assert.equal(result.modelRoleOutputs.some((role) => role.roleName === "source_usage_live_guard"), false);
+    assert.equal(result.terminalStatus, "failed");
   } finally {
     if (previous === undefined) delete process.env.SOURCE_USAGE_ROLES_USE_MODEL;
     else process.env.SOURCE_USAGE_ROLES_USE_MODEL = previous;
@@ -337,14 +342,14 @@ test("source usage roles skip planner-only roles and start with post-retrieval r
       },
     });
 
-    assert.deepEqual(startedRoles, ["retrieval_critic", "evidence_extractor"]);
+    assert.deepEqual(startedRoles, ["retrieval_critic", "evidence_extractor", "thesis_synthesizer", "citation_auditor"]);
   } finally {
     if (previous === undefined) delete process.env.SOURCE_USAGE_ROLES_USE_MODEL;
     else process.env.SOURCE_USAGE_ROLES_USE_MODEL = previous;
   }
 });
 
-test("phd level fails honestly when source usage cannot be proven", async () => {
+test("deep research fails closed when citation-eligible floor is missed", async () => {
   const { sources } = setup(5);
   const providerRouter = {
     hasProvider: () => true,
@@ -353,8 +358,8 @@ test("phd level fails honestly when source usage cannot be proven", async () => 
   const previous = process.env.SOURCE_USAGE_ROLES_USE_MODEL;
   process.env.SOURCE_USAGE_ROLES_USE_MODEL = "true";
   try {
-    await assert.rejects(() => runResearchPipeline({
-      userQuery: "PhD India parliament evidence",
+    const result = await runResearchPipeline({
+      userQuery: "Deep India parliament evidence",
       mode: "deep_research",
       preloadedSources: sources,
       liveRetrieval: false,
@@ -365,7 +370,10 @@ test("phd level fails honestly when source usage cannot be proven", async () => 
       providerName: "gemini",
       model: "test",
       allowSyntheticSourceUsage: false,
-    }), /Source usage validation failed/i);
+    });
+    assert.equal(result.terminalStatus, "failed");
+    assert.equal(result.usedLegacyFallback, false);
+    assert.match(result.finalAnswer, /Insufficient Sources/i);
   } finally {
     if (previous === undefined) delete process.env.SOURCE_USAGE_ROLES_USE_MODEL;
     else process.env.SOURCE_USAGE_ROLES_USE_MODEL = previous;
