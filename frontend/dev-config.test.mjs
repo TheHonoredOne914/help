@@ -38,7 +38,7 @@ test("provider key save refreshes every model route with the current form keys",
   assert.match(providerHook, /healthyResearchModels/);
   assert.match(providerHook, /from "\.\/provider-models"/);
 
-  for (const route of ["groq", "nvidia", "ollama", "gemini", "openrouter", "github"]) {
+  for (const route of ["groq", "nvidia", "ollama", "gemini", "openrouter", "github", "opencode"]) {
     assert.match(providerTypes, new RegExp(`MODEL_PROVIDERS[\\s\\S]*["']${route}["']`));
   }
   assert.match(providerHook, /apiFetchWithTimeout\(`\$\{base\}\/api\/\$\{provider\}\/models\?refresh=\$\{refreshToken\}`, \{ headers: providerHeaders \}/);
@@ -52,6 +52,9 @@ test("provider key save refreshes every model route with the current form keys",
   assert.match(providerKeys, /X-Firecrawl-Api-Key/);
   assert.match(settingsDialog, /id="exa-key"/);
   assert.match(settingsDialog, /id="firecrawl-key"/);
+  assert.match(settingsDialog, /id="opencode-key"/);
+  assert.match(providerKeys, /opencodeApiKey: string/);
+  assert.match(providerKeys, /X-OpenCode-Api-Key/);
   assert.match(providerTypes, /"exa"/);
   assert.match(providerTypes, /"firecrawl"/);
 });
@@ -72,23 +75,24 @@ test("provider model refresh accepts 200 payloads that return model ids as strin
   assert.match(statusNormalizer, /availableForDisplay: isProviderDisplayable\(next,\s*models\)/);
 });
 
-test("light chat shell keeps assistant text visible and welcome glint scoped", async () => {
+test("light chat shell keeps assistant text visible without cursor glint", async () => {
   const indexHtml = await readFile(new URL("./index.html", import.meta.url), "utf8");
   const chatArea = await readFile(new URL("./src/components/chat/chat-area.tsx", import.meta.url), "utf8");
   const indexCss = await readFile(new URL("./src/index.css", import.meta.url), "utf8");
 
   assert.doesNotMatch(indexHtml, /<html[^>]*class=["'][^"']*\bdark\b/);
   assert.doesNotMatch(chatArea, /text-neutral-900\s+dark:prose-invert\s+dark:text-neutral-100/);
-  assert.match(chatArea, /assistant-bubble rounded-2xl rounded-tl-sm text-foreground/);
-  assert.match(chatArea, /from\s+["']\.\/cursor-glint["']/);
-  assert.match(chatArea, /<CursorGlint\s*\/>/);
+  assert.match(chatArea, /assistant-bubble rounded-lg rounded-tl-sm text-\[var\(--ink\)\]/);
+  assert.doesNotMatch(chatArea, /from\s+["']\.\/cursor-glint["']/);
+  assert.doesNotMatch(chatArea, /<CursorGlint\s*\/>/);
   assert.doesNotMatch(chatArea, /<div className=["']hidden["']>\s*[\s\S]*data-testid=["']char-counter["']/);
   assert.doesNotMatch(chatArea, />\{input\.length\}\/4000<\/span>/);
 
-  assert.match(indexCss, /\.cursor-glint\s*\{/);
+  assert.doesNotMatch(indexCss, /\.cursor-glint\s*\{/);
+  assert.doesNotMatch(indexCss, /\.bestdel-hero-glow\s*\{/);
   assert.equal(indexCss.match(/^\.feature-card\s*\{/gm)?.length ?? 0, 1);
   assert.equal(indexCss.match(/^\.accent-gradient-bg\s*\{/gm)?.length ?? 0, 1);
-  assert.equal(indexCss.match(/^@keyframes wandShimmer\b/gm)?.length ?? 0, 1);
+  assert.equal(indexCss.match(/^@keyframes wandShimmer\b/gm)?.length ?? 0, 0);
   assert.doesNotMatch(indexCss, /assistant-fade-in\s*>\s*\*\s*\{[\s\S]*token-fade-in/);
 });
 
@@ -106,7 +110,7 @@ test("chat composer hierarchy stays compact and message bubbles keep readable me
   assert.match(chatArea, /data-testid="button-toggle-live-research"/);
   assert.match(chatArea, /activeChip=/);
   assert.match(chatArea, /onSelectChip=/);
-  assert.match(chatComposer, /rounded-\[24px\]/);
+  assert.match(chatComposer, /rounded-lg/);
   assert.doesNotMatch(chatComposer, /absolute right-2 bottom-2/);
   assert.match(chatArea, /max-w-\[85ch\]/);
   assert.doesNotMatch(chatArea, /max-w-\[90%\] md:max-w-\[86%\] lg:max-w-\[82%\]/);

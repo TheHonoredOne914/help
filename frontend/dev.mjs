@@ -10,6 +10,9 @@ const backendOrigin = "http://localhost:3000";
 
 process.chdir(root);
 
+// Local dev serves a production bundle; enable dev-only routes via explicit flag.
+process.env.VITE_ENABLE_FIXTURES = "true";
+
 await import("./build.mjs");
 
 const mimeTypes = new Map([
@@ -93,13 +96,25 @@ const server = http.createServer(async (req, res) => {
 });
 
 const preferredPort = Number(process.env.FRONTEND_PORT ?? 5173);
+// Bind IPv4 explicitly — "localhost" can resolve to ::1-only on Windows, which
+// makes http://127.0.0.1:5173 (and some embedded browsers) get ERR_CONNECTION_REFUSED.
+const listenHost = process.env.FRONTEND_HOST ?? "0.0.0.0";
+
+function logReady(port) {
+  console.log(`Frontend ready at http://127.0.0.1:${port}/ (also http://localhost:${port}/)`);
+}
+
 server.on("error", (error) => {
   if (error.code !== "EADDRINUSE") throw error;
-  server.listen(0, "localhost");
+  server.listen(0, listenHost, () => {
+    const address = server.address();
+    const port = typeof address === "object" && address ? address.port : 0;
+    logReady(port);
+  });
 });
 
-server.listen(preferredPort, "localhost", () => {
+server.listen(preferredPort, listenHost, () => {
   const address = server.address();
   const port = typeof address === "object" && address ? address.port : preferredPort;
-  console.log(`Frontend ready at http://localhost:${port}/`);
+  logReady(port);
 });
