@@ -70,21 +70,22 @@ test("catalog models can display and stay selectable for explicit user choice", 
     serper: { ...baseStatus, provider: "serper" },
   } as any;
   const models = {
-    groq: [{ id: "llama-3.3-70b-versatile" }],
+    groq: [{ id: "openai/gpt-oss-120b" }],
     gemini: [{ id: "gemini-2.5-pro" }],
     cerebras: [{ id: "llama3.3-70b" }],
     nvidia: [],
     openrouter: [],
     github: [],
     ollama: [],
+    opencode: [],
   };
 
-  assert.deepEqual(buildHealthyResearchModels(statuses, models), ["groq/llama-3.3-70b-versatile", "gemini/gemini-2.5-pro", "cerebras/llama3.3-70b"]);
+  assert.deepEqual(buildHealthyResearchModels(statuses, models), ["groq/openai/gpt-oss-120b", "gemini/gemini-2.5-pro", "cerebras/llama3.3-70b"]);
 });
 
 test("stale selected model repairs only to a research-usable model", () => {
-  const healthy = ["nvidia/moonshotai/kimi-k2.6", "gemini/gemini-2.5-pro"];
-  assert.equal(repairSelectedModel("groq/llama-3.3-70b-versatile", healthy), "nvidia/moonshotai/kimi-k2.6");
+  const healthy = ["nvidia/meta/llama-3.1-8b-instruct", "gemini/gemini-2.5-pro"];
+  assert.equal(repairSelectedModel("groq/llama-3.3-70b-versatile", healthy), "nvidia/meta/llama-3.1-8b-instruct");
   assert.equal(repairSelectedModel("gemini/gemini-2.5-pro", healthy), "gemini/gemini-2.5-pro");
   assert.equal(repairSelectedModel("groq/llama-3.3-70b-versatile", []), null);
 });

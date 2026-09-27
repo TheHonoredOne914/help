@@ -5,7 +5,7 @@ import { generateCoreResearchAnswer } from "../../src/core/generation/core-answe
 import { buildPassingAnswer, createQualityGateHarnessFixture } from "./harness/fixtures.js";
 
 test("BUG-21-09: repairable unsupported claims degrade with disclosure instead of raw throw", async () => {
-  const { contract, registry, input, claimGraph, claimLedger, role } = createQualityGateHarnessFixture({ mode: "fast_research", sourceCount: 10 });
+  const { contract, registry, input, claimGraph, claimLedger, role } = createQualityGateHarnessFixture({ mode: "fast_research", sourceCount: 40 });
   const evidencePacks = Object.values(buildEvidencePacks(registry, contract));
   const providerRouter = {
     hasProvider: () => true,
@@ -44,7 +44,7 @@ test("BUG-21-09: repairable unsupported claims degrade with disclosure instead o
 });
 
 test("unsupported legal case labels are repaired before hard-fail decision", async () => {
-  const { contract, registry, input, claimGraph, claimLedger, role } = createQualityGateHarnessFixture({ mode: "fast_research", sourceCount: 10 });
+  const { contract, registry, input, claimGraph, claimLedger, role } = createQualityGateHarnessFixture({ mode: "fast_research", sourceCount: 40 });
   const evidencePacks = Object.values(buildEvidencePacks(registry, contract));
   const providerRouter = {
     hasProvider: () => true,

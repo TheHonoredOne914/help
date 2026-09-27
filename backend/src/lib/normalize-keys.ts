@@ -21,6 +21,16 @@ function splitCleanEnvValue(v: string | undefined): string[] {
     .filter((part): part is string => Boolean(part));
 }
 
+/** Split a normalized multi-slot key string into individual keys. */
+export function parseApiKeyList(value: string | null | undefined): string[] {
+  return splitCleanEnvValue(value ?? undefined);
+}
+
+/** First usable key — for SDKs that cannot rotate (never pass comma-joined). */
+export function primaryApiKey(value: string | null | undefined): string | undefined {
+  return parseApiKeyList(value)[0];
+}
+
 function collectEnvValues(baseNames: string[]): string[] {
   const values: string[] = [];
   for (const baseName of baseNames) {
@@ -72,6 +82,7 @@ export function normalizeApiKeys(): void {
   promoteEnvPair("SERPER_API_KEY", "SERPER_KEY");
   promoteEnvPair("BRAVE_API_KEY", "BRAVE_KEY");
   promoteEnvPair("JINA_API_KEY", "JINA_KEY");
+  promoteEnvPair("OPENCODE_API_KEY", "OPENCODE_ZEN_API_KEY");
 
   const looksLikeOpenAI = (v?: string) => !!v && (v.startsWith("sk-svcacct") || v.startsWith("sk-proj-") || (v.startsWith("sk-") && v.length > 80));
   const looksLikeAnthropic = (v?: string) => !!v && v.startsWith("sk-ant-");

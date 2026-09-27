@@ -9,7 +9,7 @@ import { getCachedExtraction, writeCachedExtraction, writeNegativeExtraction, ty
 import { hydrateExtractionCooldown, persistExtractionCooldown } from "./provider-health-cache.js";
 import { getNormalizedSource, writeNormalizedSource } from "./normalized-source-cache.js";
 import { getEvidenceReadyCard, writeEvidenceReadyCard } from "./evidence-ready-cache.js";
-import { retrievalCacheEnabled } from "./retrieval-cache-policy.js";
+import { retrievalCacheEnabled, shouldWriteNegativeExtraction } from "./retrieval-cache-policy.js";
 
 export class RetrievalCacheManager {
   readonly metrics = new RetrievalCacheMetrics();
@@ -31,7 +31,13 @@ export class RetrievalCacheManager {
 
   getExtraction(input: ExtractionCacheInput): EnrichedSource | NegativeExtractionEntry | null {
     const value = getCachedExtraction(input);
-    this.metrics.record("url_extraction", value ? (isNegativeExtractionEntry(value) ? "negative_hit" : "hit") : "miss");
+    if (!value) {
+      this.metrics.record("url_extraction", "miss");
+    } else if (isNegativeExtractionEntry(value)) {
+      this.metrics.record("url_extraction", "negative_hit", value.failureReason);
+    } else {
+      this.metrics.record("url_extraction", "hit");
+    }
     return value;
   }
 
@@ -41,9 +47,19 @@ export class RetrievalCacheManager {
   }
 
   writeNegativeExtraction(input: ExtractionCacheInput, failure: { status?: string; error?: string }): boolean {
+    const policy = shouldWriteNegativeExtraction({
+      status: failure.status,
+      error: failure.error,
+      provider: input.provider,
+      fullChainFailed: input.fullChainFailed !== false,
+    });
     const wrote = writeNegativeExtraction(input, failure);
-    if (wrote) this.metrics.record("url_extraction", "write");
+    if (wrote) this.metrics.record("url_extraction", "write", policy.reason);
     return wrote;
+  }
+
+  recordSchemaMismatch(layer: "url_extraction" | "search_result" | "evidence_ready" = "url_extraction"): void {
+    this.metrics.recordSchemaMismatch(layer);
   }
 
   hydrateExtractionCooldown(state: ExtractionCooldownState, options: Parameters<typeof hydrateExtractionCooldown>[1] = {}): ExtractionCooldownState {

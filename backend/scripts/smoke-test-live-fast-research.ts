@@ -4,6 +4,8 @@ import { resolve } from "node:path";
 import { normalizeApiKeys } from "../src/lib/normalize-keys.js";
 import { runResearchPipeline } from "../src/core/pipeline/research-pipeline.js";
 import { stripPipelineMetadata } from "../src/core/pipeline/pipeline-metadata.js";
+import { countProseWords } from "../src/core/quality-gate/quality-gate-input.js";
+import { MODE_THRESHOLDS } from "../src/core/quality-gate/mode-thresholds.js";
 import { buildProviderStatusPayload } from "../src/routes/providers.js";
 import { buildCoreProviderRouter } from "../src/services/anthropic-service.js";
 import type { PipelineEvent } from "../src/core/pipeline/pipeline-events.js";
@@ -43,9 +45,10 @@ const selectedModel = process.env.LIVE_FAST_RESEARCH_MODEL ?? process.env.LIVE_R
 const liveQuestion = process.env.LIVE_RESEARCH_QUESTION?.trim();
 const useCache = process.env.LIVE_RESEARCH_USE_CACHE !== "false";
 const autoFallback = process.env.LIVE_RESEARCH_AUTO_FALLBACK !== "false";
-const minimumSourceCount = Number(process.env.LIVE_MIN_SOURCES ?? process.env.LIVE_FAST_MIN_SOURCES ?? (mode === "council" ? 180 : mode === "deep_research" ? 45 : 40));
-const minimumWordCount = Number(process.env.LIVE_MIN_WORDS ?? (mode === "council" ? 3000 : mode === "deep_research" ? 2000 : 1000));
-const maximumWordCount = Number(process.env.LIVE_MAX_WORDS ?? (mode === "council" ? 5500 : mode === "deep_research" ? 3000 : 0));
+const minimumSourceCount = Number(process.env.LIVE_MIN_SOURCES ?? process.env.LIVE_FAST_MIN_SOURCES ?? (mode === "council" ? 110 : mode === "deep_research" ? 45 : 40));
+const modeWordThresholds = MODE_THRESHOLDS[mode];
+const minimumWordCount = Number(process.env.LIVE_MIN_WORDS ?? modeWordThresholds.finalAnswerMinWords);
+const maximumWordCount = Number(process.env.LIVE_MAX_WORDS ?? modeWordThresholds.finalAnswerMaxWords);
 const defaultQuestion = "Should the Election Commission and Union Government regulate online political advertising, deepfakes, and platform transparency during elections?";
 const runtimeQuestion = [
   `${mode === "council" ? "Council" : mode === "deep_research" ? "Deep" : "Fast"} research for an AIPPM debate in India:`,
@@ -152,7 +155,7 @@ try {
 }
 
 const visibleAnswer = stripPipelineMetadata(result.finalAnswer).trim();
-const wordCount = visibleAnswer.split(/\s+/).filter(Boolean).length;
+const wordCount = countProseWords(visibleAnswer);
 const hasJavascriptTrash = /JavaScript must be enabled|Decrease Font Size|Increase Font Size|Normal Theme|Green Theme|Orange Theme|Sitemap|Advance Search|Ooops|Page not found/i.test(visibleAnswer);
 const outputPath = resolve(`live-${mode}-answer.md`);
 const debugPath = resolve(`live-${mode}-debug.json`);

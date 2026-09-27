@@ -7,6 +7,7 @@ import {
   type SourceUsageFailureReport,
   type SourceUsageMapItem,
 } from "../../evidence/source-usage-map.js";
+import { ROLE_FALLBACK_MODELS } from "../../providers/catalog/index.js";
 import type { ProviderName, ProviderRequest } from "../../providers/provider-types.js";
 import { getHealthyProvidersForResearch } from "../../providers/provider-health.js";
 import { safeProviderErrorReport } from "../../providers/provider-errors.js";
@@ -28,13 +29,7 @@ import {
   type RoleGenerationPayload,
 } from "./types.js";
 
-const DEFAULT_FALLBACK_MODELS: Array<{ providerName: ProviderName; model: string }> = [
-  { providerName: "groq", model: "llama-3.3-70b-versatile" },
-  { providerName: "openrouter", model: "qwen/qwen3-32b" },
-  { providerName: "nvidia", model: "nvidia/llama-3.3-nemotron-super-49b-v1" },
-  { providerName: "gemini", model: "gemini-2.5-flash" },
-  { providerName: "github", model: "openai/gpt-4.1" },
-];
+const DEFAULT_FALLBACK_MODELS = ROLE_FALLBACK_MODELS;
 
 export function runDeterministicModelRole(input: ModelRoleRunnerInput): ModelRoleOutput {
   const minimum = input.minimumSourceRequirement ?? 30;
@@ -334,18 +329,26 @@ function buildOutput(input: ModelRoleSourceUsageInput, usageItems: SourceUsageMa
     output: buildRolePayload(input.roleName, usageItems, input.researchMode ?? "unknown", retries, providerUsed, modelUsed, recoveredDeterministically, providerErrors),
   };
   const validation = validateSourceUsageMap(draft, input.evidenceRegistry, input.agendaContract, effectiveRequired);
-  const synced = syncModelRoleOutputWithValidation({ ...draft, output: { ...(draft.output as RoleGenerationPayload), validation } }, validation);
+  // Drop rejected items, then re-validate cleaned map so fail flags match aggregate.
+  let synced = syncModelRoleOutputWithValidation({ ...draft, output: { ...(draft.output as RoleGenerationPayload), validation } }, validation);
+  const revalidation = validateSourceUsageMap(synced, input.evidenceRegistry, input.agendaContract, effectiveRequired);
+  synced = syncModelRoleOutputWithValidation({ ...synced, output: { ...(synced.output as RoleGenerationPayload), validation: revalidation } }, revalidation);
   const usedSourceIds = synced.usedSourceIds;
-  const satisfied = validation.passed && usedSourceIds.length >= effectiveRequired;
+  const satisfied = revalidation.passed && usedSourceIds.length >= effectiveRequired;
+  const validationFailure = revalidation.failures[0];
   return {
     ...synced,
     unusedSourceIds: receivedSourceIds.filter((sourceId) => !usedSourceIds.includes(sourceId)),
     sourceCountUsed: usedSourceIds.length,
     sourceRequirementSatisfied: satisfied,
-    sourceGapReason: satisfied ? undefined : `Only ${usedSourceIds.length} sources used by ${input.roleName}.`,
+    sourceGapReason: satisfied
+      ? undefined
+      : (validationFailure ?? `Only ${usedSourceIds.length} sources used by ${input.roleName} (need ${effectiveRequired}).`),
     sourceUsageCount: usedSourceIds.length,
     sourceUsageRequirementSatisfied: satisfied,
-    failureReason: satisfied ? undefined : `Only ${usedSourceIds.length} sources used by ${input.roleName}.`,
+    failureReason: satisfied
+      ? undefined
+      : (validationFailure ?? `Only ${usedSourceIds.length} sources used by ${input.roleName} (need ${effectiveRequired}).`),
   };
 }
 

@@ -1,12 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { generateCoreResearchAnswer } from "../../src/core/generation/core-answer-generator.js";
-import { buildSourceUsageMapFromRegistry } from "../../src/core/evidence/source-usage-map.js";
 import { FakeProviderRouter } from "../harness/fake-provider-router.js";
 import { createFakeResearchRun } from "../harness/fake-evidence-registry.js";
+import { RESEARCH_LIMITS } from "../../src/core/config/research-mode.js";
+import { buildModeSourceUsageMap } from "../helpers/source-usage-fixtures.js";
 
 function passingAnswer(run: ReturnType<typeof createFakeResearchRun>): string {
-  const citations = run.evidenceRegistry.getCitationEligibleSources().slice(0, 30).map((source) => run.evidenceRegistry.getCitationMarkdown(source.id)).join(" ");
+  const citations = run.evidenceRegistry.getCitationEligibleSources().slice(0, RESEARCH_LIMITS.fast_research.minFinalUniqueCitedSources).map((source) => run.evidenceRegistry.getCitationMarkdown(source.id)).join(" ");
   return [
     "# Executive Thesis",
     `Treasury Bench and Opposition should frame the issue as constitutional challenge, Election Commission defence, Supreme Court doctrine, Union ministry accountability, public order, rights-based challenge, POIs, rebuttals, motions, amendments, committee recommendations, resolution clauses, central contradiction, and strategic synthesis. ${citations}`,
@@ -22,7 +23,7 @@ function passingAnswer(run: ReturnType<typeof createFakeResearchRun>): string {
 }
 
 test("Groq 413 triggers compressed retry with a smaller prompt", async () => {
-  const run = createFakeResearchRun(30, "fast_research");
+  const run = createFakeResearchRun(RESEARCH_LIMITS.fast_research.minFinalUniqueCitedSources, "fast_research");
   const router = new FakeProviderRouter()
     .script("groq", [{ type: "413" }, { type: "success", content: passingAnswer(run) }]);
 
@@ -34,7 +35,7 @@ test("Groq 413 triggers compressed retry with a smaller prompt", async () => {
     evidenceRegistry: run.evidenceRegistry,
     evidencePacks: run.evidencePacks,
     claimGraph: run.claimGraph,
-    sourceUsageMaps: [buildSourceUsageMapFromRegistry("evidence_extractor", run.evidenceRegistry, run.agendaContract, 30)],
+    sourceUsageMaps: [buildModeSourceUsageMap("fast_research", "evidence_extractor", run.evidenceRegistry, run.agendaContract)],
     allowSyntheticSourceUsage: true,
     generationMode: "model",
     providerRouter: router as any,
@@ -50,7 +51,7 @@ test("Groq 413 triggers compressed retry with a smaller prompt", async () => {
 });
 
 test("Groq 429 tries a healthy fallback provider and keeps raw body sanitized", async () => {
-  const run = createFakeResearchRun(30, "fast_research");
+  const run = createFakeResearchRun(RESEARCH_LIMITS.fast_research.minFinalUniqueCitedSources, "fast_research");
   const router = new FakeProviderRouter()
     .script("groq", [{ type: "429", message: "Groq 429 org_secret billing https://console.groq.com/settings/billing" }])
     .script("nvidia", [{ type: "success", content: passingAnswer(run) }]);
@@ -63,7 +64,7 @@ test("Groq 429 tries a healthy fallback provider and keeps raw body sanitized", 
     evidenceRegistry: run.evidenceRegistry,
     evidencePacks: run.evidencePacks,
     claimGraph: run.claimGraph,
-    sourceUsageMaps: [buildSourceUsageMapFromRegistry("evidence_extractor", run.evidenceRegistry, run.agendaContract, 30)],
+    sourceUsageMaps: [buildModeSourceUsageMap("fast_research", "evidence_extractor", run.evidenceRegistry, run.agendaContract)],
     allowSyntheticSourceUsage: true,
     generationMode: "model",
     providerRouter: router as any,

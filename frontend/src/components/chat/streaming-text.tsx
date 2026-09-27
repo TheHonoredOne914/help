@@ -1,8 +1,13 @@
 import { useEffect, useRef, useState } from "react";
+import { ResearchAnswerBody } from "./research-answer-body";
+import type { CitationMessageSource } from "./citation-parts";
+import type { PipelineMetadata } from "@/lib/pipeline-metadata";
 
 interface StreamingTextProps {
   content: string;
   isStreaming: boolean;
+  sources?: CitationMessageSource[];
+  citationStatus?: PipelineMetadata["citationStatus"] | null;
 }
 
 // Fix (Bug: L10): Avoid splitting Indian citations like "A.I.R. 2026 S.C. 1"
@@ -23,7 +28,12 @@ function splitIntoStableChunks(content: string): string[] {
   return result;
 }
 
-export function StreamingText({ content, isStreaming }: StreamingTextProps) {
+export function StreamingText({
+  content,
+  isStreaming,
+  sources = [],
+  citationStatus = null,
+}: StreamingTextProps) {
   // Fix (Bug: L16): Only recalculate chunks when content actually changes length,
   // not on every character — use a stable ref to avoid thrashing on every tick
   const chunksRef = useRef<string[]>([]);
@@ -85,18 +95,25 @@ export function StreamingText({ content, isStreaming }: StreamingTextProps) {
   }, [chunks.length, isStreaming]);
 
   const visibleChunks = chunks.slice(0, visibleCount);
+  // Completed paragraphs as markdown; keep the in-flight tail as plain stream text.
+  const completedCount = isStreaming ? Math.max(0, visibleChunks.length - 1) : visibleChunks.length;
+  const completed = visibleChunks.slice(0, completedCount);
+  const inFlight = isStreaming ? visibleChunks[visibleChunks.length - 1] : undefined;
+  const completedMarkdown = completed.filter((c) => c !== "\n").join("\n\n");
 
   return (
     <div className="streaming-fade space-y-3" aria-live="polite" aria-atomic="false">
-      {visibleChunks.map((chunk, index) => (
-        // Fix (Bug: L68): Use content hash + position for key to avoid collisions on repetitive bullets
-        <div
-          key={`${index}-${chunk.length}-${chunk.charCodeAt(0) ?? 0}`}
-          className="stream-chunk whitespace-pre-wrap"
-        >
-          {chunk}
-        </div>
-      ))}
+      {completedMarkdown ? (
+        <ResearchAnswerBody
+          content={completedMarkdown}
+          sources={sources}
+          citationStatus={citationStatus}
+          hideSourcesFooter
+        />
+      ) : null}
+      {inFlight != null && inFlight !== "\n" && (
+        <div className="stream-chunk whitespace-pre-wrap">{inFlight}</div>
+      )}
     </div>
   );
 }

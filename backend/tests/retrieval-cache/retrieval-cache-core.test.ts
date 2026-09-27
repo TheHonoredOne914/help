@@ -41,7 +41,7 @@ test("URL extraction negative cache is distinct from positive cache", async () =
   assert.equal(Boolean(hit && "negative" in hit && hit.negative), true);
 });
 
-test("snippet fallback cache hit stays weak and limited", async () => {
+test("snippet fallback cache hit stays limited but preserves weak eligibility", async () => {
   const { retrievalCacheManager } = await import("../../src/core/retrieval-cache/index.js");
   const source: EnrichedSource = {
     title: "Snippet source",
@@ -54,8 +54,21 @@ test("snippet fallback cache hit stays weak and limited", async () => {
     extractionMethod: "snippet_fallback",
     extractionStatus: "partial",
     fallbackExtractionUsed: true,
-    extractionQuality: "low",
+    extractionQuality: "medium",
     citationEligible: true,
+    citationStrength: "weak",
+    enrichmentCard: {
+      sourceId: 1,
+      url: "https://example.com/report",
+      title: "Snippet source",
+      topChunks: ["short snippet only"],
+      citationEligible: true,
+      limitedSource: true,
+      relevanceScore: 4,
+      extractionQuality: "medium",
+      keyTermsMatched: ["snippet"],
+      citationStrength: "weak",
+    },
   };
 
   retrievalCacheManager.writeExtraction({ provider: "local", url: source.url }, source);
@@ -63,7 +76,8 @@ test("snippet fallback cache hit stays weak and limited", async () => {
   assert.ok(hit && !("negative" in hit));
   assert.equal(hit.extractionMethod, "snippet_fallback");
   assert.equal(hit.limitedSource, true);
-  assert.equal(hit.citationEligible, false);
+  assert.equal(hit.citationEligible, true);
+  assert.equal(hit.citationStrength, "weak");
 });
 
 test("provider health cache hydrates Jina 422 and Firecrawl cooldown", async () => {
@@ -146,4 +160,58 @@ test("evidence-ready cache does not reuse cards across agenda fingerprints", asy
 
   assert.equal(retrievalCacheManager.getEvidenceCard(source as any, "agenda-b"), null);
   assert.deepEqual(retrievalCacheManager.getEvidenceCard(source as any, "agenda-a"), card);
+});
+
+test("evidence-ready cache hits across runs with different source IDs", async () => {
+  const { retrievalCacheManager } = await import("../../src/core/retrieval-cache/index.js");
+  retrievalCacheStore.clearNamespace("evidence_card");
+  const fullText = "Cross-run evidence card reuse depends on URL and content hash, not sequential source IDs.";
+  const sourceRunA = {
+    id: 1,
+    title: "Cross run source",
+    url: "https://example.com/cross-run?utm_source=a",
+    canonicalUrl: "https://example.com/cross-run",
+    domain: "example.com",
+    bucketIds: ["court_legal"],
+    sourceClass: "court_primary",
+    authorityScore: 90,
+    date: null,
+    fullText,
+    snippet: null,
+    extractionQuality: "full",
+    keyFacts: [],
+    keyNumbers: [],
+    legalHoldings: [],
+    namedEntities: [],
+    limitations: [],
+    confidence: "high",
+    citationEligible: true,
+    topChunks: [],
+    citationStrength: "strong",
+    limitedSource: false,
+  };
+  const card = {
+    sourceId: 1,
+    title: sourceRunA.title,
+    url: sourceRunA.url,
+    sourceClass: sourceRunA.sourceClass,
+    bucketIds: sourceRunA.bucketIds,
+    relevanceScore: 88,
+    keyFacts: [],
+    keyNumbers: [],
+    legalHoldings: [],
+    limitations: [],
+    contentPreview: fullText,
+    extractionQuality: "full",
+    citationStrength: "strong",
+    limitedSource: false,
+  };
+
+  retrievalCacheManager.writeEvidenceCard(sourceRunA as any, card as any, "agenda-x");
+
+  const sourceRunB = { ...sourceRunA, id: 99, url: "https://example.com/cross-run" };
+  const hit = retrievalCacheManager.getEvidenceCard(sourceRunB as any, "agenda-x");
+  assert.ok(hit);
+  assert.deepEqual(hit, card);
+  assert.notEqual(sourceRunA.id, sourceRunB.id);
 });

@@ -58,6 +58,45 @@ test("OpenRouter fallback prefers a healthy free model from the live catalog", (
   assert.equal(candidates.some((candidate) => /claude-3\.5-sonnet/.test(candidate.model)), false);
 });
 
+test("OpenRouter failover skips a paid model even when it is first in the catalog", () => {
+  const candidates = buildGenerationCandidates(input({
+    providerStatuses: [
+      { providerName: "github" as const, configured: true, healthy: true, status: "healthy" as const, canChat: true, chatVerified: true, models: ["openai/gpt-4.1"] },
+      {
+        providerName: "openrouter" as const,
+        configured: true,
+        healthy: true,
+        status: "healthy" as const,
+        canChat: true,
+        chatVerified: true,
+        models: ["openai/gpt-4o", "openai/gpt-4o-mini", "google/gemma-3-27b-it:free"],
+      },
+    ],
+  }));
+  const openrouter = candidates.filter((candidate) => candidate.providerName === "openrouter");
+  assert.ok(openrouter.length > 0);
+  assert.ok(openrouter.every((candidate) => /:free$/i.test(candidate.model)));
+  assert.equal(openrouter[0]?.model, "google/gemma-3-27b-it:free");
+});
+
+test("OpenRouter failover does not emit a paid model when the catalog has none free", () => {
+  const candidates = buildGenerationCandidates(input({
+    providerStatuses: [
+      { providerName: "github" as const, configured: true, healthy: true, status: "healthy" as const, canChat: true, chatVerified: true, models: ["openai/gpt-4.1"] },
+      {
+        providerName: "openrouter" as const,
+        configured: true,
+        healthy: true,
+        status: "healthy" as const,
+        canChat: true,
+        chatVerified: true,
+        models: ["openai/gpt-4o", "openai/gpt-4o-mini"],
+      },
+    ],
+  }));
+  assert.equal(candidates.some((candidate) => candidate.providerName === "openrouter" && !/:free$/i.test(candidate.model)), false);
+});
+
 test("user-selected healthy free OpenRouter model stays first", () => {
   const candidates = buildGenerationCandidates(input({
     providerRouter: new RouterWithProviders(["openrouter", "github"]) as any,

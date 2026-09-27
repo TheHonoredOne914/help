@@ -1,5 +1,6 @@
 import type { ModelProvider, ProviderRequest, ProviderResponse } from "./provider-types.js";
 import { safeProviderError } from "./provider-errors.js";
+import { multiKeyFetch } from "../../lib/multi-key-fetch.js";
 
 export class GeminiProvider implements ModelProvider {
   readonly name = "gemini" as const;
@@ -7,7 +8,7 @@ export class GeminiProvider implements ModelProvider {
 
   async complete(request: ProviderRequest): Promise<ProviderResponse> {
     if (!this.options.apiKey) throw safeProviderError(this.name, new Error("Gemini provider unavailable: missing API key"));
-    const fetchFn = this.options.fetchFn ?? fetch;
+    const fetchFn = this.options.fetchFn ?? multiKeyFetch;
     const started = Date.now();
     const baseUrl = request.onStream
       ? `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(request.model)}:streamGenerateContent?alt=sse&key=${encodeURIComponent(this.options.apiKey)}`

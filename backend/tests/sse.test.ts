@@ -37,19 +37,20 @@ test("sendTerminalError emits structured error payload and closes the stream", (
   });
 
   assert.equal(res.writableEnded, true);
-  assert.equal(res.writes.length, 2);
+  // Terminal error carries done:true itself, so the guard suppresses the bare done frame.
+  assert.equal(res.writes.length, 1);
 
   assert.match(res.writes[0], /^id: 1\n/);
-  assert.match(res.writes[1], /^id: 2\n/);
   const errorEvent = parseSseData(res.writes[0]);
-  const doneEvent = parseSseData(res.writes[1]);
 
   assert.deepEqual(errorEvent, {
+    eventType: "provider_error",
+    terminalStatus: "provider_error",
+    done: true,
     error: "Provider call failed",
     code: "provider_error",
     retryable: false,
   });
-  assert.deepEqual(doneEvent, { done: true });
 });
 
 test("finishStream is idempotent", () => {

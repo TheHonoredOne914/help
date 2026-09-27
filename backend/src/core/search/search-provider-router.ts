@@ -11,10 +11,15 @@ import { zenrowsExtractorProvider } from "./providers/zenrows-extractor-provider
 import { classifyProviderError, redactKnownSecretValues, safeProviderError } from "./search-provider-errors.js";
 import { assertSafeSourceFetchUrl } from "../security/source-url-policy.js";
 import { logProviderCall } from "../providers/provider-call-logger.js";
-import { getExtractionProviderOrder, getSearchProviderOrder } from "./search-fallback-policy.js";
+import { ampUrlVariant, classifyExtractionUrl, getExtractionProviderOrder, getSearchProviderOrder, getSearchProviderOrderForBucket, waybackAvailabilityUrl } from "./search-fallback-policy.js";
 import { mergeSearchResultsByUrl } from "./search-result-normalizer.js";
 import { createExtractionCooldown, recordExtractionFailure, shouldSkipExtractionProvider, type ExtractionCooldownState } from "../providers/limits/extraction-cooldown.js";
+import { canonicalizeUrl as canonicalizeCacheUrl } from "../retrieval-cache/retrieval-cache-key.js";
+import { isEvidenceShell } from "../retrieval/enrichment/source-quality.js";
+import { multiKeyFetch } from "../../lib/multi-key-fetch.js";
 import type { ExtractedPageContent, ExtractorProvider, ExtractorProviderName, ExtractionProviderName, NormalizedSearchResult, SearchOnlyProviderName, SearchPolicyMode, SearchProvider, SearchProviderKeys, SearchQuery, SearchRuntimeMetadata } from "./search-provider-types.js";
+
+const HEDGE_DELAY_MS = 1800;
 
 const SEARCH_PROVIDERS: Record<SearchOnlyProviderName, SearchProvider> = {
   serper: serperSearchProvider,
@@ -45,56 +50,106 @@ export interface SearchWithFallbackOptions {
 
 export async function searchWithFallback(query: SearchQuery, options: SearchWithFallbackOptions): Promise<NormalizedSearchResult[]> {
   const available = providerAvailability(options.keys);
-  const providers = options.providers?.length ? options.providers : getSearchProviderOrder(options.mode ?? "deep_research", available);
+  const providers = options.providers?.length
+    ? options.providers
+    : getSearchProviderOrderForBucket(query.bucketId, options.mode ?? "deep_research", available);
   const runtime = options.runtime;
-  const results: NormalizedSearchResult[] = [];
-  for (const providerName of providers) {
-    const provider = SEARCH_PROVIDERS[providerName];
-    if (!provider.configured(options.keys)) {
-      const message = `missing ${providerName} api key`;
-      options.onProviderError?.(message);
-      runtime?.providerFailures.push({ provider: providerName, status: "missing_key", error: message });
-      continue;
-    }
-    const providerStarted = Date.now();
-    try {
-      const providerResults = await provider.search(query, options.keys, { fetchFn: options.fetchFn, timeoutMs: options.timeoutMs, abortSignal: options.abortSignal });
-      logProviderCall({
-        event: "search_provider_call",
-        providerName,
-        providerKind: "search",
-        operation: "search",
-        statusCode: 200,
-        latencyMs: Date.now() - providerStarted,
-        query: query.query,
-        resultCount: providerResults.length,
-        success: true,
-      });
-      if (providerResults.length > 0) {
-        if (runtime) {
-          runtime.searchProvidersUsed.push(providerName);
-          runtime.sourceCountsByProvider[providerName] = (runtime.sourceCountsByProvider[providerName] ?? 0) + providerResults.length;
-        }
+  if (providers.length === 0) return [];
+  if (providers.length === 1 || options.providers?.length === 1) {
+    return mergeSearchResultsByUrl(await runOneSearchProvider(providers[0]!, query, options));
+  }
+
+  // Hedged fan-out: primary immediately; secondary after ~1.8s if primary still empty/pending.
+  const primary = providers[0]!;
+  const secondary = providers[1]!;
+  const primaryPromise = runOneSearchProvider(primary, query, options);
+  const hedge = await Promise.race([
+    primaryPromise.then((rows) => ({ source: "primary" as const, rows })),
+    sleep(HEDGE_DELAY_MS, options.abortSignal).then(() => ({ source: "timer" as const, rows: [] as NormalizedSearchResult[] })),
+  ]);
+  if (hedge.source === "primary" && hedge.rows.length > 0) {
+    return mergeSearchResultsByUrl(hedge.rows);
+  }
+  const [primaryRows, secondaryRows] = await Promise.all([
+    hedge.source === "primary" ? Promise.resolve(hedge.rows) : primaryPromise,
+    runOneSearchProvider(secondary, query, options),
+  ]);
+  let merged = mergeSearchResultsByUrl([...primaryRows, ...secondaryRows]);
+  if (merged.length === 0) {
+    for (const providerName of providers.slice(2)) {
+      const more = await runOneSearchProvider(providerName, query, options);
+      if (more.length > 0) {
+        merged = mergeSearchResultsByUrl(more);
+        break;
       }
-      results.push(...providerResults);
-    } catch (error) {
-      logProviderCall({
-        event: "search_provider_call",
-        providerName,
-        providerKind: "search",
-        operation: "search",
-        statusCode: (error as any)?.statusCode ?? null,
-        latencyMs: Date.now() - providerStarted,
-        query: query.query,
-        errorCode: classifyProviderError(error),
-        success: false,
-      });
-      const message = `${providerName}: ${safeProviderError(error)}`;
-      options.onProviderError?.(message);
-      runtime?.providerFailures.push({ provider: providerName, status: classifyProviderError(error), error: message });
     }
   }
-  return mergeSearchResultsByUrl(results);
+  return merged;
+}
+
+async function runOneSearchProvider(
+  providerName: SearchOnlyProviderName,
+  query: SearchQuery,
+  options: SearchWithFallbackOptions,
+): Promise<NormalizedSearchResult[]> {
+  const provider = SEARCH_PROVIDERS[providerName];
+  const runtime = options.runtime;
+  if (!provider.configured(options.keys)) {
+    const message = `missing ${providerName} api key`;
+    options.onProviderError?.(message);
+    runtime?.providerFailures.push({ provider: providerName, status: "missing_key", error: message });
+    return [];
+  }
+  const providerStarted = Date.now();
+  try {
+    const providerResults = await provider.search(query, options.keys, { fetchFn: options.fetchFn ?? multiKeyFetch, timeoutMs: options.timeoutMs, abortSignal: options.abortSignal });
+    logProviderCall({
+      event: "search_provider_call",
+      providerName,
+      providerKind: "search",
+      operation: "search",
+      statusCode: 200,
+      latencyMs: Date.now() - providerStarted,
+      query: query.query,
+      resultCount: providerResults.length,
+      success: true,
+    });
+    if (providerResults.length > 0 && runtime) {
+      runtime.searchProvidersUsed.push(providerName);
+      runtime.sourceCountsByProvider[providerName] = (runtime.sourceCountsByProvider[providerName] ?? 0) + providerResults.length;
+    }
+    return providerResults;
+  } catch (error) {
+    logProviderCall({
+      event: "search_provider_call",
+      providerName,
+      providerKind: "search",
+      operation: "search",
+      statusCode: (error as any)?.statusCode ?? null,
+      latencyMs: Date.now() - providerStarted,
+      query: query.query,
+      errorCode: classifyProviderError(error),
+      success: false,
+    });
+    const message = `${providerName}: ${safeProviderError(error)}`;
+    options.onProviderError?.(message);
+    runtime?.providerFailures.push({ provider: providerName, status: classifyProviderError(error), error: message });
+    return [];
+  }
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+      return;
+    }
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener("abort", () => {
+      clearTimeout(timer);
+      reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+    }, { once: true });
+  });
 }
 
 export interface ExtractWithFallbackOptions {
@@ -111,7 +166,7 @@ export interface ExtractWithFallbackOptions {
 export async function extractWithFallback(url: string, options: ExtractWithFallbackOptions): Promise<ExtractedPageContent> {
   let safeUrl: URL;
   try {
-    safeUrl = await assertSafeSourceFetchUrl(url, { resolveDns: (options.fetchFn ?? fetch) === fetch });
+    safeUrl = await assertSafeSourceFetchUrl(url, { resolveDns: (options.fetchFn ?? multiKeyFetch) === fetch || (options.fetchFn ?? multiKeyFetch) === multiKeyFetch });
   } catch (error) {
     const message = safeProviderError(error, "Unsafe source URL blocked");
     options.runtime?.providerFailures.push({ provider: "extractor", status: "unavailable", error: message });
@@ -130,76 +185,137 @@ export async function extractWithFallback(url: string, options: ExtractWithFallb
       metadata: { fallbackExtractionUsed: true },
     };
   }
-  const disabled = options.disabledExtractionProviders ?? new Set<ExtractorProviderName>();
-  const order = getExtractionProviderOrder({
+
+  const urlClass = classifyExtractionUrl(safeUrl.href);
+  const availability = {
     firecrawl: Boolean(options.keys.firecrawl?.trim()),
     jina: Boolean(options.keys.jina?.trim()),
     scraperapi: Boolean(options.keys.scraperapi?.trim()) && process.env.SCRAPERAPI_ENABLED === "true",
-    zenrows: Boolean(options.keys.zenrows?.trim()),
-    scrapingbee: Boolean(options.keys.scrapingbee?.trim()),
-    geekflare: Boolean(options.keys.geekflare?.trim()),
-  }).filter((providerName) => providerName === "snippet_fallback" || providerName === "web_service" || !disabled.has(providerName as ExtractorProviderName));
+    zenrows: Boolean(options.keys.zenrows?.trim()) && process.env.ZENROWS_ENABLED === "true",
+    scrapingbee: Boolean(options.keys.scrapingbee?.trim()) && process.env.SCRAPINGBEE_ENABLED === "true",
+    geekflare: Boolean(options.keys.geekflare?.trim()) && process.env.GEEKFLARE_ENABLED === "true",
+  };
+  const disabled = options.disabledExtractionProviders ?? new Set<ExtractorProviderName>();
+  let escalateFirecrawl = false;
   let lastError: string | undefined;
   let fallbackExtractionUsed = false;
   const cooldown = options.extractionCooldown;
-  for (const providerName of order) {
-    if (providerName === "snippet_fallback" || providerName === "web_service") continue;
+  const attempted = new Set<string>();
 
-    // Check cooldown state before attempting extraction
-    if (cooldown && isCooldownTrackedProvider(providerName) && shouldSkipExtractionProvider(cooldown, providerName, safeUrl.href)) {
-      continue;
-    }
-
-    const extractorStarted = Date.now();
-    try {
-      const result = await EXTRACTORS[providerName as ExtractorProviderName].extract(safeUrl.href, options.keys, { fetchFn: options.fetchFn, timeoutMs: options.timeoutMs, snippet: options.snippet, abortSignal: options.abortSignal });
-      logProviderCall({
-        event: "extraction_provider_call",
-        providerName,
-        providerKind: "extraction",
-        operation: "extract",
-        statusCode: result.status === "failed" ? 502 : 200,
-        latencyMs: result.latencyMs ?? Date.now() - extractorStarted,
-        success: result.status !== "failed",
-      });
-      if (options.runtime) {
-        options.runtime.extractionProvidersUsed.push(providerName);
-        options.runtime.extractionProviderBreakdown[providerName] = (options.runtime.extractionProviderBreakdown[providerName] ?? 0) + 1;
+  const tryExtractUrl = async (targetUrl: string, meta: Record<string, unknown> = {}): Promise<ExtractedPageContent | null> => {
+    const order = getExtractionProviderOrder(availability, { url: targetUrl, escalateFirecrawl })
+      .filter((providerName) => providerName === "snippet_fallback" || providerName === "web_service" || !disabled.has(providerName as ExtractorProviderName));
+    for (const providerName of order) {
+      if (providerName === "snippet_fallback" || providerName === "web_service") continue;
+      const attemptKey = `${providerName}:${targetUrl}`;
+      if (attempted.has(attemptKey)) continue;
+      attempted.add(attemptKey);
+      const cooldownUrl = providerName === "jina" ? canonicalizeCacheUrl(targetUrl) : targetUrl;
+      if (cooldown && isCooldownTrackedProvider(providerName) && shouldSkipExtractionProvider(cooldown, providerName, cooldownUrl)) {
+        continue;
       }
-      return { ...result, metadata: { ...(result.metadata ?? {}), fallbackExtractionUsed } };
-    } catch (error) {
-      const httpStatus = (error as any)?.statusCode;
-      logProviderCall({
-        event: "extraction_provider_call",
-        providerName,
-        providerKind: "extraction",
-        operation: "extract",
-        statusCode: httpStatus ?? null,
-        latencyMs: Date.now() - extractorStarted,
-        errorCode: classifyProviderError(error),
-        success: false,
-      });
-      fallbackExtractionUsed = true;
-      lastError = `${providerName}: ${redactKnownSecretValues(safeProviderError(error), Object.values(options.keys))}`;
-      const status = classifyProviderError(error);
-      options.runtime?.providerFailures.push({ provider: providerName, status, error: lastError });
-
-      // Record in cooldown tracker
-      if (cooldown && isCooldownTrackedProvider(providerName)) {
-        recordExtractionFailure(cooldown, providerName, httpStatus, safeUrl.href);
-      }
-
-      if (status === "invalid_key" || httpStatus === 402 || httpStatus === 429) {
-        disabled.add(providerName as ExtractorProviderName);
+      const extractorStarted = Date.now();
+      try {
+        const result = await EXTRACTORS[providerName as ExtractorProviderName].extract(targetUrl, options.keys, {
+          fetchFn: options.fetchFn ?? multiKeyFetch,
+          timeoutMs: options.timeoutMs,
+          snippet: options.snippet,
+          abortSignal: options.abortSignal,
+        });
+        logProviderCall({
+          event: "extraction_provider_call",
+          providerName,
+          providerKind: "extraction",
+          operation: "extract",
+          statusCode: result.status === "failed" ? 502 : 200,
+          latencyMs: result.latencyMs ?? Date.now() - extractorStarted,
+          success: result.status !== "failed",
+        });
         if (options.runtime) {
-          options.runtime.disabledExtractionProviders ??= [];
-          if (!options.runtime.disabledExtractionProviders.includes(providerName)) {
-            options.runtime.disabledExtractionProviders.push(providerName);
+          options.runtime.extractionProvidersUsed.push(providerName);
+          options.runtime.extractionProviderBreakdown[providerName] = (options.runtime.extractionProviderBreakdown[providerName] ?? 0) + 1;
+        }
+        const text = result.markdown ?? result.text ?? result.excerpt ?? "";
+        const trimmed = text.replace(/\s+/g, " ").trim();
+        // Match enrich-source isUsableExtractorResult (≥300). Thin non-shell Jina
+        // "successes" used to short-circuit before Firecrawl escalate → snippet_fallback
+        // on eci/pib/gov hosts that dominate live fast_research.
+        const MIN_USABLE_EXTRACT_CHARS = 300;
+        if (result.status !== "failed" && trimmed && isEvidenceShell(trimmed)) {
+          fallbackExtractionUsed = true;
+          escalateFirecrawl = true;
+          lastError = `${providerName}: evidence shell`;
+          continue;
+        }
+        if (result.status === "failed" || !trimmed) {
+          fallbackExtractionUsed = true;
+          lastError = result.error ?? `${providerName}: empty extraction`;
+          if (providerName === "jina") escalateFirecrawl = true;
+          continue;
+        }
+        if (trimmed.length < MIN_USABLE_EXTRACT_CHARS) {
+          fallbackExtractionUsed = true;
+          escalateFirecrawl = true;
+          lastError = `${providerName}: thin extraction (${trimmed.length} chars)`;
+          continue;
+        }
+        return { ...result, url: targetUrl, metadata: { ...(result.metadata ?? {}), fallbackExtractionUsed, ...meta } };
+      } catch (error) {
+        const httpStatus = (error as any)?.statusCode;
+        logProviderCall({
+          event: "extraction_provider_call",
+          providerName,
+          providerKind: "extraction",
+          operation: "extract",
+          statusCode: httpStatus ?? null,
+          latencyMs: Date.now() - extractorStarted,
+          errorCode: classifyProviderError(error),
+          success: false,
+        });
+        fallbackExtractionUsed = true;
+        lastError = `${providerName}: ${redactKnownSecretValues(safeProviderError(error), Object.values(options.keys))}`;
+        const status = classifyProviderError(error);
+        options.runtime?.providerFailures.push({ provider: providerName, status, error: lastError });
+        if (cooldown && isCooldownTrackedProvider(providerName)) {
+          recordExtractionFailure(cooldown, providerName, httpStatus, providerName === "jina" ? canonicalizeCacheUrl(targetUrl) : targetUrl);
+        }
+        if (providerName === "jina") escalateFirecrawl = true;
+        if (status === "invalid_key" || httpStatus === 402 || httpStatus === 429) {
+          disabled.add(providerName as ExtractorProviderName);
+          if (options.runtime) {
+            options.runtime.disabledExtractionProviders ??= [];
+            if (!options.runtime.disabledExtractionProviders.includes(providerName)) {
+              options.runtime.disabledExtractionProviders.push(providerName);
+            }
           }
         }
       }
     }
+    return null;
+  };
+
+  let hit = await tryExtractUrl(safeUrl.href);
+  if (!hit && escalateFirecrawl && availability.firecrawl) {
+    hit = await tryExtractUrl(safeUrl.href);
   }
+  if (!hit && urlClass === "paywalled") {
+    const amp = ampUrlVariant(safeUrl.href);
+    if (amp) {
+      try {
+        await assertSafeSourceFetchUrl(amp, { resolveDns: false });
+        hit = await tryExtractUrl(amp, { ampVariant: true });
+      } catch { /* skip unsafe amp */ }
+    }
+    if (!hit) {
+      const archived = waybackAvailabilityUrl(safeUrl.href);
+      try {
+        await assertSafeSourceFetchUrl(archived, { resolveDns: false });
+        hit = await tryExtractUrl(archived, { archivedFrom: safeUrl.href, archivedAt: new Date().toISOString().slice(0, 10) });
+      } catch { /* skip unsafe archive */ }
+    }
+  }
+  if (hit) return hit;
+
   options.runtime?.extractionProvidersUsed.push("snippet_fallback");
   if (options.runtime) {
     options.runtime.fallbackExtractionCount += 1;

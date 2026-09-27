@@ -1,4 +1,7 @@
 import { Component, type ReactNode, type ErrorInfo } from "react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { AlertCircle } from "lucide-react";
 
 interface Props { children: ReactNode; fallback?: ReactNode; }
 interface State { hasError: boolean; error: Error | null; }
@@ -17,19 +20,34 @@ export class ErrorBoundary extends Component<Props, State> {
   render() {
     if (this.state.hasError) {
       return this.props.fallback ?? (
-        <div className="flex h-screen items-center justify-center bg-background text-foreground">
-          <div className="max-w-md space-y-3 p-6 border border-border rounded-lg">
-            <h2 className="text-lg font-semibold text-destructive">BestDel encountered an error</h2>
-            <p className="text-sm text-muted-foreground font-mono">
-              {this.state.error?.message ?? "Unknown error"}
-            </p>
-            <button
-              className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded hover:opacity-90"
-              onClick={() => { this.setState({ hasError: false, error: null }); window.location.reload(); }}
-            >
-              Reload
-            </button>
+        <div className="flex min-h-screen w-full flex-col items-center justify-center gap-8 bg-[var(--paper)] p-4">
+          <div className="brand-masthead">
+            <h1 className="brand-masthead-title">BestDel</h1>
+            <div className="order-paper-rule" aria-hidden />
           </div>
+
+          <Card className="mx-4 w-full max-w-md border-[var(--line)] bg-[var(--surface)] shadow-sm">
+            <CardContent className="space-y-4 pt-6">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="mt-0.5 h-6 w-6 shrink-0 text-[var(--status-danger)]" />
+                <div>
+                  <h2 className="text-xl font-semibold text-[var(--ink)]">Something went wrong</h2>
+                  <p className="mt-2 text-sm text-[var(--slate)]">
+                    BestDel hit an unexpected error. Reload the desk to continue.
+                  </p>
+                  {this.state.error?.message ? (
+                    <p className="mt-3 font-mono text-xs text-[var(--slate)]">{this.state.error.message}</p>
+                  ) : null}
+                </div>
+              </div>
+              <Button
+                className="w-full"
+                onClick={() => { this.setState({ hasError: false, error: null }); window.location.reload(); }}
+              >
+                Reload the desk
+              </Button>
+            </CardContent>
+          </Card>
         </div>
       );
     }

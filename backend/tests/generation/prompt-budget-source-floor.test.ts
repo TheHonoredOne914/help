@@ -134,7 +134,7 @@ test("sourceCardTarget under high compression still respects mode floor", () => 
 });
 
 test("content compression happens before source reduction", () => {
-  // Use deep_research (floor=80) with 80 sources and a very tight budget
+  // Use deep_research (floor=45) with 80 sources and a very tight budget
   // to force multiple compression rounds
   const run = createFakeResearchRun(80, "deep_research");
   const budget = getPromptBudget({
@@ -166,11 +166,11 @@ test("content compression happens before source reduction", () => {
     tightBudget,
   );
 
-  // The floor for deep_research is 80 — with 80 sources available,
-  // the pipeline must never go below 80
+  // The floor for deep_research is 45 — with 80 sources available,
+  // the pipeline must never go below 45
   assert.ok(report.compressionApplied, "compression must have been applied");
   assert.ok(
     report.includedSources >= RESEARCH_LIMITS.deep_research.minFinalUniqueCitedSources,
-    `deep_research: expected >= 80 sources, got ${report.includedSources}`,
+    `deep_research: expected >= ${RESEARCH_LIMITS.deep_research.minFinalUniqueCitedSources} sources, got ${report.includedSources}`,
   );
 });

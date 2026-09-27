@@ -10,6 +10,8 @@ const SECRET_PATTERNS: RegExp[] = [
   /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}\b/gi,
   /\b(authorization|x-api-key|api-key)\s*[:=]\s*["']?[^"',\s}]+/gi,
   /\b([A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|KEY))\s*=\s*["']?[^"',\s}]+/g,
+  /\b(?:api_key|apikey|key)\s*=\s*[^&\s#'"]+/gi,
+  /["'](?:api_key|apikey|key)["']\s*:\s*["']?[^"',\s}]*/gi,
 ];
 
 export function redactSecretString(input: string): string {

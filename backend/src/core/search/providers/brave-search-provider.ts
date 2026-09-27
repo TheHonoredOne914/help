@@ -1,3 +1,4 @@
+import { multiKeyFetch } from "../../../lib/multi-key-fetch.js";
 import { fetchWithTimeout, safeResponseText, statusFromHttp, SearchProviderError } from "../search-provider-errors.js";
 import { normalizeSearchResults } from "../search-result-normalizer.js";
 import type { SearchProvider, SearchProviderHealth } from "../search-provider-types.js";
@@ -9,7 +10,7 @@ export const braveSearchProvider: SearchProvider = {
     const key = keys.brave?.trim();
     if (!key) throw new SearchProviderError("brave", "missing_key", "Brave API key is not configured");
     const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query.query)}&count=${Math.min(query.maxResults ?? 10, 20)}`;
-    const response = await fetchWithTimeout(options.fetchFn ?? fetch, url, { headers: { Accept: "application/json", "X-Subscription-Token": key }, signal: options.abortSignal }, options.timeoutMs ?? 12000);
+    const response = await fetchWithTimeout(options.fetchFn ?? multiKeyFetch, url, { headers: { Accept: "application/json", "X-Subscription-Token": key }, signal: options.abortSignal }, options.timeoutMs ?? 12000);
     if (!response.ok) throw new SearchProviderError("brave", statusFromHttp(response.status), `Brave search failed: ${response.status} ${await safeResponseText(response)}`, response.status);
     return normalizeSearchResults("brave", await response.json(), { query: query.query, bucketId: query.bucketId });
   },

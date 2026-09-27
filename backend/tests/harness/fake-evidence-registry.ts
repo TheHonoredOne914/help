@@ -2,11 +2,11 @@ import { buildAgendaContract } from "../../src/core/agenda/agenda-contract.js";
 import { buildClaimGraph } from "../../src/core/evidence/claim-graph.js";
 import { buildEvidencePacks } from "../../src/core/evidence/evidence-pack-builder.js";
 import { buildEvidenceRegistryFromSources, type EvidenceSource } from "../../src/core/evidence/evidence-registry.js";
-import type { ResearchMode } from "../../src/core/config/research-mode.js";
+import { RESEARCH_LIMITS, type ResearchMode } from "../../src/core/config/research-mode.js";
 
 export function createFakeResearchRun(sourceCount = 25, mode: ResearchMode = "fast_research") {
   const agendaContract = buildAgendaContract({ requestId: `fake-${sourceCount}`, originalUserQuery: "AIPPM debate on Indian electoral integrity, civil liberties, Supreme Court doctrine, Election Commission defence, and Union ministry accountability" });
-  agendaContract.minimumUniqueCitedSources = mode === "fast_research" ? 10 : 30;
+  agendaContract.minimumUniqueCitedSources = RESEARCH_LIMITS[mode].minFinalUniqueCitedSources;
   agendaContract.minimumEvidenceCardsPerModel = agendaContract.minimumUniqueCitedSources;
   const buckets = agendaContract.requiredSourceBuckets.map((bucket) => bucket.bucketId);
   const sources: EvidenceSource[] = Array.from({ length: sourceCount }, (_, index) => {

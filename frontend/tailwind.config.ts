@@ -15,7 +15,17 @@ export default {
     extend: {
       fontFamily: {
         sans: ["var(--app-font-sans)", "ui-sans-serif", "system-ui", "sans-serif"],
+        serif: ["var(--app-font-serif)", "Georgia", "serif"],
         mono: ["var(--app-font-mono)", "ui-monospace", "monospace"],
+      },
+      fontSize: {
+        "2xs": ["0.625rem", { lineHeight: "1.5" }],
+        xs: ["0.75rem", { lineHeight: "1.55" }],
+        sm: ["0.875rem", { lineHeight: "1.55" }],
+        base: ["1rem", { lineHeight: "1.55" }],
+        lg: ["1.25rem", { lineHeight: "1.4" }],
+        xl: ["1.75rem", { lineHeight: "1.3" }],
+        "2xl": ["2.25rem", { lineHeight: "1.2" }],
       },
       colors: {
         border: "hsl(var(--border))",
@@ -62,29 +72,35 @@ export default {
           ring: "hsl(var(--sidebar-ring))",
         },
         chart: {
-          1: "hsl(var(--chart-1))",
-          2: "hsl(var(--chart-2))",
-          3: "hsl(var(--chart-3))",
-          4: "hsl(var(--chart-4))",
-          5: "hsl(var(--chart-5))",
+          1: "var(--chart-1)",
+          2: "var(--chart-2)",
+          3: "var(--chart-3)",
+          4: "var(--chart-4)",
+          5: "var(--chart-5)",
         },
-        constitutional: {
-          DEFAULT: "var(--accent-solid)",
-          hover: "var(--accent-hover)",
-          subtle: "var(--accent-subtle)",
-          glow: "var(--accent-glow)",
-          border: "var(--accent-border)",
+        ink: "var(--ink)",
+        slate: "var(--slate)",
+        paper: "var(--paper)",
+        surface: "var(--surface)",
+        navy: {
+          DEFAULT: "var(--navy)",
+          hover: "var(--navy-hover)",
         },
         brass: {
-          DEFAULT: "var(--accent-secondary)",
+          DEFAULT: "var(--brass)",
           subtle: "var(--accent-secondary-subtle)",
           border: "var(--accent-secondary-border)",
         },
+        line: "var(--line)",
+        success: "var(--status-success)",
+        warn: "var(--status-warn)",
+        danger: "var(--status-danger)",
       },
       borderRadius: {
-        lg: "var(--radius)",
-        md: "calc(var(--radius) - 2px)",
-        sm: "calc(var(--radius) - 4px)",
+        sm: "var(--radius-sm)",
+        md: "var(--radius-md)",
+        lg: "var(--radius-lg)",
+        DEFAULT: "var(--radius-md)",
       },
       keyframes: {
         "accordion-down": {

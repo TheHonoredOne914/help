@@ -48,9 +48,10 @@ type StageBudgets = {
 const BUDGETS: Record<ResearchMode, ResearchLatencyBudget> = {
   fast_research: {
     mode: "fast_research",
-    totalBudgetMs: 90_000,
+    // Enrichment needs ~96s for Tier-2 after paid miss; 90s total was starving wayback (live: 0).
+    totalBudgetMs: 120_000,
     retrievalBudgetMs: 60_000,
-    enrichmentBudgetMs: 48_000,
+    enrichmentBudgetMs: 96_000,
     sourceUsageBudgetMs: 10_000,
     generationBudgetMs: 15_000,
     repairBudgetMs: 3_000,

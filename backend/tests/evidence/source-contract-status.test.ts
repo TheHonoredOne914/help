@@ -30,7 +30,7 @@ test("deep research source shortfall without SourceGapReport fails", () => {
   assert.equal(result.passed, false);
 });
 
-test("PhD and council require strict source completion by default", () => {
+test("deep and council can pass with source gaps when evidence exists", () => {
   for (const mode of ["deep_research", "council"] as const) {
     const result = evaluateSourceContract({
       mode,
@@ -40,8 +40,9 @@ test("PhD and council require strict source completion by default", () => {
       sourceGapReport: { explanation: "Shortfall." },
     });
 
-    assert.equal(result.status, "failed");
-    assert.equal(result.passedWithSourceGaps, false);
+    assert.equal(result.status, "passed_with_source_gaps");
+    assert.equal(result.passedWithSourceGaps, true);
+    assert.equal(result.passedStrict, false);
   }
 });
 
@@ -69,4 +70,21 @@ test("source contract score zero cannot be a normal pass", () => {
 
   assert.notEqual(result.status, "passed");
   assert.equal(result.passedStrict, false);
+});
+
+test("fast research: citation floor with SourceUsage near-miss gap is not a strict pass", () => {
+  const result = evaluateSourceContract({
+    mode: "fast_research",
+    requiredSources: 40,
+    citationEligibleSources: 42,
+    finalUniqueCitedSources: 40,
+    sourceGapReport: {
+      explanation: "Validated SourceUsageMap covered 39/40 required sources, so the answer must be treated as a source-gap result.",
+    },
+  });
+
+  assert.equal(result.status, "passed_with_source_gaps");
+  assert.equal(result.passedStrict, false);
+  assert.equal(result.passedWithSourceGaps, true);
+  assert.equal(result.passed, true);
 });

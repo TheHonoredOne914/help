@@ -3,12 +3,14 @@ import type { BucketedQueryPlan } from "./query-planner.js";
 import { redactSecretString } from "../security/secret-redaction.js";
 import type { CacheManager } from "../../services/cache-manager.js";
 import { createSearchRuntimeMetadata, searchWithFallback } from "../search/search-provider-router.js";
-import { searchModeForBucket } from "../search/search-fallback-policy.js";
+import { getSearchProviderOrderForBucket, searchModeForBucket } from "../search/search-fallback-policy.js";
 import type { ExtractorProviderName, SearchOnlyProviderName } from "../search/search-provider-types.js";
 import { retrievalCacheManager } from "../retrieval-cache/index.js";
 import type { ResearchMode } from "../config/research-mode.js";
 import { logger } from "../../lib/logger.js";
 import { multiKeyFetch } from "../../lib/multi-key-fetch.js";
+
+const HEDGE_MS = 1800;
 
 export class RetrievalError extends Error {
   constructor(
@@ -104,19 +106,29 @@ export async function runSearchPlan(plan: BucketedQueryPlan, options: SearchExec
   for (const [queryIndex, query] of plan.queries.entries()) {
     tasks.push(async () => {
       if (options.abortSignal?.aborted) throw new RetrievalError("Retrieval aborted", [], 0);
-      const providerOrder = rotateProviders(providers, queryIndex).slice(0, maxProviderAttempts);
-      for (const provider of providerOrder) {
-        const mapped = await searchOneProvider({
-          provider,
-          query,
-          queryIndex,
-          plan,
-          options,
-          recordProviderError,
-        });
-        if (mapped.length > 0) return mapped;
-      }
-      return [];
+      const available = {
+        serper: Boolean(keyForProvider("serper", options.providerKeys)),
+        exa: Boolean(keyForProvider("exa", options.providerKeys)),
+        tavily: Boolean(keyForProvider("tavily", options.providerKeys)),
+        brave: Boolean(keyForProvider("brave", options.providerKeys)),
+      };
+      const bucketOrder = getSearchProviderOrderForBucket(query.bucketId, options.mode, available);
+      // Keep the full available order. Hedged search races the first two, then
+      // walks the rest on empty results — slicing here would hide working keys.
+      const providerOrder = (bucketOrder.length ? bucketOrder : rotateProviders(providers, queryIndex))
+        .filter((provider) => providers.includes(provider))
+        .slice(0, Math.max(maxProviderAttempts, 4));
+      if (providerOrder.length === 0) return [];
+      const found = await hedgedProviderSearch({
+        providerOrder,
+        query,
+        queryIndex,
+        plan,
+        options,
+        recordProviderError,
+      });
+      const cap = options.maxResultsPerQuery ?? query.maxResultsPerQuery;
+      return found.slice(0, Math.max(0, cap));
     });
   }
 
@@ -183,19 +195,23 @@ function maxSearchAttemptsForMode(mode: ResearchMode | undefined, providerCount:
   return Math.min(3, providerCount);
 }
 
-async function searchOneProvider(args: {
-  provider: SearchProviderName;
+async function hedgedProviderSearch(args: {
+  providerOrder: SearchProviderName[];
   query: BucketedQueryPlan["queries"][number];
   queryIndex: number;
   plan: BucketedQueryPlan;
   options: SearchExecutionOptions;
   recordProviderError: (error: string) => void;
 }): Promise<RawSearchResult[]> {
-  const { provider, query, queryIndex, plan, options, recordProviderError } = args;
-  const providerQuery = queryForProvider(provider, query.query, query.expectedDomains);
-  const legacyCacheKey = `${provider}:${providerQuery}:${query.bucketId}:${options.maxResultsPerQuery ?? query.maxResultsPerQuery}`;
+  const { providerOrder, query, queryIndex, plan, options, recordProviderError } = args;
+  const primary = providerOrder[0]!;
+  const secondary = providerOrder[1];
+
+  // Single cache key on primary — hedge must not double-write.
+  const cacheProvider = primary;
+  const providerQuery = queryForProvider(primary, query.query, query.expectedDomains);
   const retrievalCacheInput = {
-    provider,
+    provider: cacheProvider,
     query: providerQuery,
     mode: options.mode,
     topicType: options.topicType ?? plan.agendaContract.topicType,
@@ -205,24 +221,149 @@ async function searchOneProvider(args: {
   };
   const retrievalCached = options.useCache ? retrievalCacheManager.getSearchResults(retrievalCacheInput) : null;
   if (retrievalCached) {
-    options.onCacheEvent?.("cache_hit", { provider, query: query.query, bucketId: query.bucketId, layer: "retrieval_cache" });
-    return retrievalCached;
-  }
-  if (options.useCache && options.cache) {
-    const cached = options.cache.get<RawSearchResult[]>("search", legacyCacheKey);
-    if (cached) {
-      options.onCacheEvent?.("cache_hit", { provider, query: query.query, bucketId: query.bucketId });
-      retrievalCacheManager.writeSearchResults(retrievalCacheInput, cached);
-      return cached;
+    options.onCacheEvent?.("cache_hit", { provider: cacheProvider, query: query.query, bucketId: query.bucketId, layer: "retrieval_cache" });
+    // Cached rows may predate diversify (or be primary-only). Still merge one
+    // unused provider so Exa-only cache hits do not starve unique URLs.
+    const diversified = await diversifySingleProviderMapped({
+      mapped: retrievalCached,
+      providerOrder,
+      query,
+      queryIndex,
+      plan,
+      options,
+      recordProviderError,
+    });
+    if (
+      options.useCache
+      && diversified.length > 0
+      && new Set(diversified.map((row) => row.provider)).size > new Set(retrievalCached.map((row) => row.provider)).size
+    ) {
+      retrievalCacheManager.writeSearchResults(retrievalCacheInput, diversified);
     }
-    options.onCacheEvent?.("cache_miss", { provider, query: query.query, bucketId: query.bucketId });
+    return diversified;
   }
+  if (options.useCache) {
+    options.onCacheEvent?.("cache_miss", { provider: cacheProvider, query: query.query, bucketId: query.bucketId, layer: "retrieval_cache" });
+  }
+
+  const primaryPromise = searchOneProviderLive({
+    provider: primary,
+    query,
+    queryIndex,
+    plan,
+    options,
+    recordProviderError,
+  });
+
+  let mapped: RawSearchResult[];
+  if (!secondary) {
+    mapped = await primaryPromise;
+  } else {
+    const raced = await Promise.race([
+      primaryPromise.then((rows) => ({ kind: "primary" as const, rows })),
+      sleep(HEDGE_MS, options.abortSignal).then(() => ({ kind: "timer" as const, rows: [] as RawSearchResult[] })),
+    ]);
+    if (raced.kind === "primary" && raced.rows.length > 0) {
+      mapped = raced.rows;
+    } else {
+      const [primaryRows, secondaryRows] = await Promise.all([
+        raced.kind === "primary" ? Promise.resolve(raced.rows) : primaryPromise,
+        searchOneProviderLive({
+          provider: secondary,
+          query,
+          queryIndex,
+          plan,
+          options,
+          recordProviderError,
+        }),
+      ]);
+      mapped = mergeRawByUrl([...primaryRows, ...secondaryRows]);
+    }
+  }
+
+  // If hedge pair returned nothing, keep walking the remaining provider order
+  // so a bad Serper/Brave key cannot hide working Tavily/Exa keys.
+  if (mapped.length === 0 && providerOrder.length > 2) {
+    for (const provider of providerOrder.slice(2)) {
+      const more = await searchOneProviderLive({
+        provider,
+        query,
+        queryIndex,
+        plan,
+        options,
+        recordProviderError,
+      });
+      if (more.length > 0) {
+        mapped = more;
+        break;
+      }
+    }
+  }
+
+  mapped = await diversifySingleProviderMapped({
+    mapped,
+    providerOrder,
+    query,
+    queryIndex,
+    plan,
+    options,
+    recordProviderError,
+  });
+
+  // Never cache empty miss/failure results — that poisons later runs into permanent empty search.
+  if (options.useCache && mapped.length > 0) {
+    retrievalCacheManager.writeSearchResults(retrievalCacheInput, mapped);
+  }
+  return mapped;
+}
+
+/** When only one search provider contributed rows, merge one unused provider for URL diversity. */
+async function diversifySingleProviderMapped(args: {
+  mapped: RawSearchResult[];
+  providerOrder: SearchProviderName[];
+  query: BucketedQueryPlan["queries"][number];
+  queryIndex: number;
+  plan: BucketedQueryPlan;
+  options: SearchExecutionOptions;
+  recordProviderError: (error: string) => void;
+}): Promise<RawSearchResult[]> {
+  const { mapped, providerOrder, query, queryIndex, plan, options, recordProviderError } = args;
+  if (mapped.length === 0 || providerOrder.length < 2) return mapped;
+  const used = new Set(mapped.map((row) => row.provider));
+  if (used.size > 1) return mapped;
+  // Include secondary (index 1): a primary-only hedge win previously skipped it via slice(2).
+  for (const provider of providerOrder) {
+    if (used.has(provider)) continue;
+    const more = await searchOneProviderLive({
+      provider,
+      query,
+      queryIndex,
+      plan,
+      options,
+      recordProviderError,
+    });
+    if (more.length > 0) {
+      return mergeRawByUrl([...mapped, ...more]);
+    }
+  }
+  return mapped;
+}
+
+async function searchOneProviderLive(args: {
+  provider: SearchProviderName;
+  query: BucketedQueryPlan["queries"][number];
+  queryIndex: number;
+  plan: BucketedQueryPlan;
+  options: SearchExecutionOptions;
+  recordProviderError: (error: string) => void;
+}): Promise<RawSearchResult[]> {
+  const { provider, query, queryIndex, plan, options, recordProviderError } = args;
+  const providerQuery = queryForProvider(provider, query.query, query.expectedDomains);
   const providerKey = keyForProvider(provider, options.providerKeys);
   if (!providerKey) {
     recordProviderError(`missing ${provider} api key`);
     return [];
   }
-
   try {
     const items = await withRetries(
       () => callSearchProvider(provider, query.query, providerKey, {
@@ -237,7 +378,7 @@ async function searchOneProvider(args: {
       plan.retryPolicy.backoffMs,
     );
     const fetchedAt = new Date().toISOString();
-    const mapped = items.map((item, rawIndex): RawSearchResult => ({
+    return items.map((item, rawIndex): RawSearchResult => ({
       id: `${provider}-${query.id}-${queryIndex}-${rawIndex}`,
       title: item.title || item.url,
       url: item.url,
@@ -252,14 +393,61 @@ async function searchOneProvider(args: {
       fetchedAt: item.retrievedAt ?? fetchedAt,
       retrievedAt: item.retrievedAt ?? fetchedAt,
     }));
-    if (options.useCache && options.cache) options.cache.set("search", legacyCacheKey, mapped, { freshness: "fresh" });
-    if (options.useCache) retrievalCacheManager.writeSearchResults(retrievalCacheInput, mapped);
-    return mapped;
   } catch (error) {
     const safe = redactSecretString(error instanceof Error ? error.message : String(error));
     recordProviderError(`${provider}: ${safe}`);
     return [];
   }
+}
+
+function mergeRawByUrl(results: RawSearchResult[]): RawSearchResult[] {
+  const map = new Map<string, RawSearchResult>();
+  for (const result of results) {
+    const key = result.url.toLowerCase();
+    const existing = map.get(key);
+    if (!existing) {
+      map.set(key, result);
+      continue;
+    }
+    map.set(key, {
+      ...existing,
+      discoveredBy: [...new Set([...(existing.discoveredBy ?? [existing.provider]), ...(result.discoveredBy ?? [result.provider])])],
+      rawRank: Math.min(existing.rawRank, result.rawRank),
+    });
+  }
+  return [...map.values()].sort((a, b) => a.rawRank - b.rawRank);
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+      return;
+    }
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener("abort", () => {
+      clearTimeout(timer);
+      reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+    }, { once: true });
+  });
+}
+
+async function searchOneProvider(args: {
+  provider: SearchProviderName;
+  query: BucketedQueryPlan["queries"][number];
+  queryIndex: number;
+  plan: BucketedQueryPlan;
+  options: SearchExecutionOptions;
+  recordProviderError: (error: string) => void;
+}): Promise<RawSearchResult[]> {
+  return hedgedProviderSearch({
+    providerOrder: [args.provider],
+    query: args.query,
+    queryIndex: args.queryIndex,
+    plan: args.plan,
+    options: args.options,
+    recordProviderError: args.recordProviderError,
+  });
 }
 
 function keyForProvider(provider: SearchProviderName, keys?: SearchExecutionOptions["providerKeys"]): string | undefined {
@@ -406,6 +594,7 @@ async function withRetries<T>(fn: () => Promise<T>, retries: number, backoffMs: 
       return await fn();
     } catch (error) {
       lastError = error;
+      if (isAbortError(error)) throw error;
       if (attempt < retries) await new Promise((resolve) => setTimeout(resolve, backoffMs * (attempt + 1)));
     }
   }
@@ -439,6 +628,10 @@ async function safeResponseText(response: Response): Promise<string> {
   } catch {
     return "";
   }
+}
+
+function isAbortError(error: unknown): boolean {
+  return Boolean(error) && typeof error === "object" && (error as { name?: string }).name === "AbortError";
 }
 
 function domainFromUrl(url: string): string {

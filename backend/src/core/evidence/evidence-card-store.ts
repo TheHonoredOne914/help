@@ -22,7 +22,7 @@ export function buildEvidenceCard(source: EvidenceSource, registry: EvidenceRegi
     debateUse: source.keyFacts[0] ?? firstRelevantSentence(source.snippet ?? source.fullText ?? "") ?? `Use only as background context for ${source.title}.`,
     limitations: source.limitations.length ? source.limitations : inferLimitations(source),
     usableSections: source.bucketIds,
-    contentPreview: (source.topChunks[0]?.text ?? source.fullText ?? source.snippet ?? "").slice(0, 600),
+    contentPreview: compressedCardExcerpt(source),
     citationStrength: source.citationStrength,
     topChunks: source.topChunks,
     limitedSource: source.limitedSource,
@@ -36,6 +36,16 @@ export function buildEvidenceCard(source: EvidenceSource, registry: EvidenceRegi
 function firstRelevantSentence(text: string): string | undefined {
   const sentence = text.split(/(?<=[.!?])\s+/).map((part) => part.trim()).find((part) => part.length >= 24);
   return sentence?.slice(0, 280);
+}
+
+/** RECOMP-style: 1–2 top sentences from topChunks for prompt body; original chunks retained on card. */
+function compressedCardExcerpt(source: EvidenceSource): string {
+  const fromChunks = source.topChunks
+    .slice(0, 2)
+    .flatMap((chunk) => chunk.text.split(/(?<=[.!?])\s+/).map((part) => part.trim()).filter((part) => part.length >= 24).slice(0, 1))
+    .slice(0, 2);
+  if (fromChunks.length) return fromChunks.join(" ").slice(0, 480);
+  return (source.topChunks[0]?.text ?? source.fullText ?? source.snippet ?? "").slice(0, 600);
 }
 
 function extractNumbers(text: string): string[] {

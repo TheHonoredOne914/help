@@ -1,5 +1,7 @@
 import type { ModelProvider, ProviderRequest, ProviderResponse } from "./provider-types.js";
+import { isOpenRouterFreeListedModel } from "./catalog/index.js";
 import { safeProviderError } from "./provider-errors.js";
+import { multiKeyFetch } from "../../lib/multi-key-fetch.js";
 
 export class OpenRouterProvider implements ModelProvider {
   readonly name = "openrouter" as const;
@@ -7,7 +9,10 @@ export class OpenRouterProvider implements ModelProvider {
 
   async complete(request: ProviderRequest): Promise<ProviderResponse> {
     if (!this.options.apiKey) throw safeProviderError(this.name, new Error("OpenRouter provider unavailable: missing API key"));
-    const fetchFn = this.options.fetchFn ?? fetch;
+    if (!isOpenRouterFreeListedModel(String(request.model ?? "").trim())) {
+      throw safeProviderError(this.name, new Error("OpenRouter is limited to free models (:free)"));
+    }
+    const fetchFn = this.options.fetchFn ?? multiKeyFetch;
     const started = Date.now();
     const response = await fetchFn("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",

@@ -33,7 +33,7 @@ test("NVIDIA catalog fallback does not fake a healthy provider", async () => {
   assert.equal(payload.source, "catalog_fallback");
   assert.equal(payload.healthy, false);
   assert.equal(payload.status, "catalog_fallback");
-  assert.ok(payload.models.some((model) => model.id === "moonshotai/kimi-k2.6"));
+  assert.ok(payload.models.some((model) => model.id.includes("nemotron-super")));
 });
 
 test("invalid NVIDIA key is not healthy and redacts provider errors", async () => {
@@ -120,7 +120,7 @@ test("catalog_fallback models are display-only and do not imply key validity", (
 
 test("Groq catalog contains expected stable models", () => {
   const groqIds = GROQ_CATALOG.map((m) => m.id);
-  assert.ok(groqIds.includes("llama-3.3-70b-versatile"), "Groq catalog must include llama-3.3-70b-versatile");
+  assert.ok(!groqIds.includes("llama-3.3-70b-versatile"), "Groq catalog must not include decommissioned llama-3.3-70b-versatile");
   assert.ok(groqIds.includes("llama-3.1-8b-instant"), "Groq catalog must include llama-3.1-8b-instant");
   assert.ok(groqIds.includes("openai/gpt-oss-120b"), "Groq catalog must include openai/gpt-oss-120b");
   assert.ok(groqIds.includes("openai/gpt-oss-20b"), "Groq catalog must include openai/gpt-oss-20b");
@@ -131,9 +131,10 @@ test("Groq catalog contains expected stable models", () => {
   assert.ok(!groqIds.includes("gemma2-9b-it"), "Groq catalog must NOT include deprecated gemma2-9b-it");
 });
 
-test("NVIDIA catalog includes kimi-k2 as preferred model", () => {
+test("NVIDIA catalog excludes stale kimi-k2.6", () => {
   const nvidiaIds = NVIDIA_CATALOG.map((m) => m.id);
-  assert.ok(nvidiaIds.includes("moonshotai/kimi-k2.6"), "NVIDIA catalog must include kimi-k2.6");
+  assert.ok(!nvidiaIds.includes("moonshotai/kimi-k2.6"), "NVIDIA catalog must not include stale kimi-k2.6");
+  assert.ok(nvidiaIds.includes("nvidia/llama-3.3-nemotron-super-49b-v1"), "NVIDIA catalog must include Nemotron Super");
 });
 
 test("GitHub catalog includes expected models", () => {
@@ -143,11 +144,12 @@ test("GitHub catalog includes expected models", () => {
   assert.ok(githubIds.includes("meta/llama-3.3-70b-instruct"), "GitHub catalog must include llama-3.3-70b-instruct");
 });
 
-test("OpenRouter catalog includes multi-provider models", () => {
+test("OpenRouter catalog is free-only", () => {
   const orIds = OPENROUTER_CATALOG.map((m) => m.id);
-  assert.ok(orIds.some((id) => id.startsWith("openai/")), "OpenRouter catalog must include OpenAI models");
-  assert.ok(orIds.some((id) => id.startsWith("anthropic/")), "OpenRouter catalog must include Anthropic models");
-  assert.ok(orIds.some((id) => id.startsWith("google/")), "OpenRouter catalog must include Google models");
+  assert.ok(orIds.length > 0, "OpenRouter catalog must include free models");
+  assert.ok(orIds.every((id) => id.endsWith(":free")), "OpenRouter catalog must only list :free models");
+  assert.ok(orIds.some((id) => id.startsWith("meta-llama/")), "OpenRouter catalog must include Meta models");
+  assert.ok(orIds.some((id) => id.startsWith("qwen/")), "OpenRouter catalog must include Qwen models");
 });
 
 test("Ollama catalog includes common local models", () => {

@@ -1,4 +1,4 @@
-import { wordCount } from "./quality-gate-input.js";
+import { countProseWords } from "./quality-gate-input.js";
 import type { ModeQualityThresholds } from "./mode-thresholds.js";
 import type { GateResult, QualityGateRuntimeInput, QualityIssue } from "./types.js";
 
@@ -30,7 +30,7 @@ export function runFinalAnswerLengthGate(
     return { score: 5, maxScore: 5, issues: [], categoryScores: { finalAnswerLength: 5 } };
   }
 
-  const actualWords = wordCount(ctx.finalText ?? "");
+  const actualWords = countProseWords(withoutIndexSections(ctx.finalText ?? ""));
   const issues: QualityIssue[] = [];
 
   if (minWords > 0 && actualWords < minWords) {
@@ -61,4 +61,9 @@ export function runFinalAnswerLengthGate(
     issues,
     categoryScores: { finalAnswerLength: Math.round(ratio * 10) },
   };
+}
+
+/** Evidence Landscape and Citation Ledger are indexes, same exclusion as unique cites. Additional Source-Backed Bullets stay. */
+function withoutIndexSections(text: string): string {
+  return text.replace(/(?:^|\n)##[^\n]*\b(?:Evidence Landscape|Citation Ledger)\b[\s\S]*?(?=\n##\s+|$)/gi, "\n");
 }

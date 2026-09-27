@@ -19,6 +19,7 @@ import {
   useCreateArchive,
   useUpdateResearchAngles,
   useListArchives,
+  useListAnthropicConversations,
   type Archive,
 } from "@/lib/api-client";
 import { useQueryClient } from "@tanstack/react-query";
@@ -36,6 +37,8 @@ export default function Chat() {
   const [newAngle, setNewAngle] = useState("");
   const queryClient = useQueryClient();
   const { data: archives = [], isLoading: archivesLoading } = useListArchives();
+  const { data: conversations = [], isLoading: conversationsLoading, isError: conversationsError } = useListAnthropicConversations(activeArchiveId);
+  const pendingArchiveIdRef = useRef<number | null>(null);
   const createArchiveMutation = useCreateArchive();
   const updateResearchAnglesMutation = useUpdateResearchAngles();
 
@@ -90,18 +93,45 @@ export default function Chat() {
     });
   }, [archives, archivesLoading]);
 
+  const lastRestoredArchiveRef = useRef<number | null>(null);
+
   useEffect(() => {
-    if (!activeArchiveId) return;
+    if (!activeArchiveId) {
+      lastRestoredArchiveRef.current = null;
+      setActiveConversationId(null);
+      return;
+    }
     localStorage.setItem("activeArchiveId", String(activeArchiveId));
+    if (conversationsLoading) return;
+    if (lastRestoredArchiveRef.current === activeArchiveId) return;
+
     const storedConversation = Number(localStorage.getItem(`activeConversationId:${activeArchiveId}`));
-    setActiveConversationId(Number.isFinite(storedConversation) && storedConversation > 0 ? storedConversation : null);
-  }, [activeArchiveId]);
+    const hasStored = Number.isFinite(storedConversation) && storedConversation > 0;
+    const storedValid = hasStored && conversations.some((conversation) => conversation.id === storedConversation);
+    if (hasStored && !storedValid) {
+      if (!conversationsError) {
+        localStorage.removeItem(`activeConversationId:${activeArchiveId}`);
+        lastRestoredArchiveRef.current = activeArchiveId;
+        setActiveConversationId(null);
+      }
+      return;
+    }
+
+    lastRestoredArchiveRef.current = activeArchiveId;
+    setActiveConversationId(storedValid ? storedConversation : null);
+  }, [activeArchiveId, conversations, conversationsLoading, conversationsError]);
 
   useEffect(() => {
     if (!activeArchiveId) return;
     const key = `activeConversationId:${activeArchiveId}`;
-    if (activeConversationId) localStorage.setItem(key, String(activeConversationId));
-    else localStorage.removeItem(key);
+    if (activeConversationId) {
+      localStorage.setItem(key, String(activeConversationId));
+      return;
+    }
+    // Archive switches null the open thread before restore reads storage.
+    // Only forget the saved thread after this archive's restore pass has run.
+    if (lastRestoredArchiveRef.current !== activeArchiveId) return;
+    localStorage.removeItem(key);
   }, [activeArchiveId, activeConversationId]);
 
   const handleArchiveChange = (archiveId: number) => {
@@ -126,22 +156,37 @@ export default function Chat() {
     setCreateArchiveError(null);
 
     try {
-      const created = await createArchiveMutation.mutateAsync({ data: { name, topic } });
-      let createdArchive: Archive = created;
+      let createdArchive: Archive;
+      if (pendingArchiveIdRef.current == null) {
+        const created = await createArchiveMutation.mutateAsync({ data: { name, topic } });
+        pendingArchiveIdRef.current = created.id;
+        createdArchive = created;
+      } else {
+        const existing = archives.find((archive) => archive.id === pendingArchiveIdRef.current);
+        createdArchive = existing ?? {
+          id: pendingArchiveIdRef.current,
+          name,
+          topic,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+      }
+
       if (angleDrafts.length > 0) {
         const angles = angleDrafts.slice(0, 20).map((a) => a.trim()).filter(Boolean);
         await updateResearchAnglesMutation.mutateAsync({
-          archiveId: created.id,
+          archiveId: createdArchive.id,
           data: { angles },
         });
-        createdArchive = { ...created, researchAngles: angles };
+        createdArchive = { ...createdArchive, researchAngles: angles };
       }
 
       queryClient.setQueryData<Archive[]>(getListArchivesQueryKey(), (old = []) => [
         ...old.filter((archive) => archive.id !== createdArchive.id),
         createdArchive,
       ]);
-      handleArchiveChange(created.id);
+      handleArchiveChange(createdArchive.id);
+      pendingArchiveIdRef.current = null;
       setCreateArchiveOpen(false);
       setArchiveName("");
       setArchiveTopic("");
@@ -158,7 +203,7 @@ export default function Chat() {
 
   return (
     <div
-      className="bestdel-app-shell flex h-dvh w-screen max-w-full overflow-hidden text-foreground font-sans"
+      className="bestdel-app-shell flex h-full min-h-0 w-full overflow-hidden text-[var(--ink)] font-sans"
       style={{ backgroundColor: "var(--bg-shell)" }}
     >
       <div className="flex min-h-0 flex-1 overflow-hidden" style={{ backgroundColor: "var(--bg-shell)" }}>
@@ -169,7 +214,7 @@ export default function Chat() {
             activeArchiveName={activeArchive?.name ?? null}
           />
           <div className="flex min-h-0 w-full flex-1 overflow-hidden">
-            <div className="flex min-h-0 flex-1 overflow-hidden border-t bg-background" style={{ borderColor: "var(--border-hex)" }}>
+            <div className="flex min-h-0 flex-1 overflow-hidden border-t bg-[var(--paper)]" style={{ borderColor: "var(--border-hex)" }}>
               <Sidebar
                 activeConversationId={activeConversationId}
                 activeArchiveId={activeArchiveId}
@@ -179,13 +224,13 @@ export default function Chat() {
                 mobileOpen={mobileSidebarOpen}
                 onMobileClose={() => setMobileSidebarOpen(false)}
               />
-              <main className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden">
+              <main className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
                 {!archivesLoading && archives.length === 0 && !createArchiveOpen && (
                   <div className="border-b px-3 py-3 sm:px-5" style={{ borderBottomColor: "var(--border-hex)" }}>
                     <div className="flex max-w-3xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                       <div className="min-w-0">
                         <div className="text-sm font-semibold">No archives yet</div>
-                        <div className="text-sm text-muted-foreground">
+                        <div className="text-sm text-[var(--slate)]">
                           Begin with an Archive, a dedicated workspace that retains context, sources, and strategy for your committee agenda.
                         </div>
                       </div>
@@ -212,7 +257,10 @@ export default function Chat() {
         open={createArchiveOpen}
         onOpenChange={(open) => {
           setCreateArchiveOpen(open);
-          if (!open) setCreateArchiveError(null);
+          if (!open) {
+            setCreateArchiveError(null);
+            pendingArchiveIdRef.current = null;
+          }
         }}
       >
         <DialogContent className="sm:max-w-xl">
@@ -261,13 +309,13 @@ export default function Chat() {
             </TabsContent>
             <TabsContent value="angles" className="space-y-3 mt-4">
               {angleDrafts.length === 0 ? (
-                <div className="text-sm text-muted-foreground">
+                <div className="text-sm text-[var(--slate)]">
                   Generate angles from Topic Setup first.
                 </div>
               ) : (
                 <div className="space-y-2 max-h-64 overflow-auto pr-1">
                   {angleDrafts.map((angle, idx) => (
-                    <div key={`${idx}-${angle}`} className="flex items-center gap-2">
+                    <div key={`angle-${idx}`} className="flex items-center gap-2">
                       <Input
                         value={angle}
                         onChange={(e) => setAngleDrafts((prev) => prev.map((a, i) => i === idx ? e.target.value : a))}
@@ -294,8 +342,8 @@ export default function Chat() {
                   variant="secondary"
                   onClick={() => {
                     const v = newAngle.trim();
-                    if (!v) return;
-                    setAngleDrafts((prev) => [...prev, v].slice(0, 20));
+                    if (!v || angleDrafts.length >= 20) return;
+                    setAngleDrafts((prev) => [...prev, v]);
                     setNewAngle("");
                   }}
                 >

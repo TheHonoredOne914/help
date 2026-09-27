@@ -269,11 +269,41 @@ export function toApiMessage(record: MessageRecord): ApiMessageRecord {
   };
 }
 
+const LOCAL_DEV_OWNER_ID = 'local-dev-user';
+
+function resolveOwnerUserId(ownerUserId?: string): string {
+  const trimmed = ownerUserId?.trim();
+  return trimmed || LOCAL_DEV_OWNER_ID;
+}
+
+function mapArchivePersistenceError(error: { message?: string; code?: string } | null | undefined): Error {
+  const message = error?.message ?? String(error ?? 'unknown database error');
+  const code = error?.code ?? '';
+  if (code === 'PGRST205' || /Could not find the table .*archives/i.test(message)) {
+    return new Error(
+      'Archive tables missing in Supabase. Run backend/scripts/setup-supabase-all.sql (see docs/supabase/ARCHIVE_PERSISTENCE.md).',
+    );
+  }
+  if (/Failed to fetch|fetch failed|ENOTFOUND|ECONNREFUSED|paused|inactive/i.test(message)) {
+    return new Error(
+      'Cannot reach Supabase (project paused or network error). Restore the project in the Supabase dashboard, then retry.',
+    );
+  }
+  return error instanceof Error ? error : new Error(message);
+}
+
 export async function listArchives(ownerUserId?: string): Promise<ArchiveRecord[]> {
   if (isUsingLocalDb()) {
     const state = await loadLocalDb();
+    const owner = ownerUserId ? resolveOwnerUserId(ownerUserId) : undefined;
     return state.archives
-      .filter((archive) => !ownerUserId || archive.owner_user_id === ownerUserId)
+      .filter((archive) => {
+        if (!owner) return true;
+        if (owner === LOCAL_DEV_OWNER_ID) {
+          return archive.owner_user_id === owner || archive.owner_user_id == null;
+        }
+        return archive.owner_user_id === owner;
+      })
       .sort((a, b) => a.created_at.localeCompare(b.created_at));
   }
 
@@ -282,20 +312,28 @@ export async function listArchives(ownerUserId?: string): Promise<ArchiveRecord[
     .from('archives')
     .select('*')
     .order('created_at', { ascending: true });
-  if (ownerUserId) query = query.eq('owner_user_id', ownerUserId);
+  if (ownerUserId) {
+    const owner = resolveOwnerUserId(ownerUserId);
+    // Local-dev traffic should also surface legacy rows that predate owner scoping.
+    query =
+      owner === LOCAL_DEV_OWNER_ID
+        ? query.or(`owner_user_id.eq.${owner},owner_user_id.is.null`)
+        : query.eq('owner_user_id', owner);
+  }
   const { data, error } = await query;
 
-  if (error) throw error;
+  if (error) throw mapArchivePersistenceError(error);
   return data || [];
 }
 
 export async function createArchive(name: string, topic: string, ownerUserId?: string): Promise<ArchiveRecord> {
+  const owner = resolveOwnerUserId(ownerUserId);
   if (isUsingLocalDb()) {
     return mutateLocalDb((state) => {
       const now = new Date().toISOString();
       const archive: ArchiveRecord = {
         id: state.nextIds.archive++,
-        owner_user_id: ownerUserId ?? null,
+        owner_user_id: owner,
         name,
         topic,
         created_at: now,
@@ -311,11 +349,11 @@ export async function createArchive(name: string, topic: string, ownerUserId?: s
   
   const { data, error } = await supabase
     .from('archives')
-    .insert([{ name, topic, owner_user_id: ownerUserId ?? null, created_at: now, updated_at: now }])
+    .insert([{ name, topic, owner_user_id: owner, created_at: now, updated_at: now }])
     .select()
     .single();
 
-  if (error) throw error;
+  if (error) throw mapArchivePersistenceError(error);
   return data;
 }
 

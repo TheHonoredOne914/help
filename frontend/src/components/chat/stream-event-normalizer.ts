@@ -1,5 +1,5 @@
 import type { ChatMode } from "./chat-model-routing";
-import { isStaleRunScopedEvent } from "./stale-event-guard";
+import { isStaleRunScopedEvent } from "@/lib/run-state/stale-event-guard";
 import type { PipelineRunStatus } from "@/hooks/use-pipeline-state";
 import { normalizeTerminalEvent } from "@/lib/run-state/terminal-event-normalizer";
 

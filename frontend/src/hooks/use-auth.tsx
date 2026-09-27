@@ -23,19 +23,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!isSupabaseConfigured) return;
 
-    // Get initial session
+    let active = true;
+    let settledByListener = false;
+
     supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!active || settledByListener) return;
       setSession(session);
+      setLoading(false);
+    }).catch(() => {
+      if (!active || settledByListener) return;
       setLoading(false);
     });
 
-    // Listen for auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      settledByListener = true;
+      if (!active) return;
       setSession(session);
       setLoading(false);
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const signOut = async () => {

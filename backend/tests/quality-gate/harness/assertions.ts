@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import type { QualityGateReport } from "../../../src/core/verification/thesis-quality-gate.js";
+import type { QualityGateReport } from "../../../src/core/quality-gate/types.js";
 
 export function expectGateFail(report: QualityGateReport, bugId: string): void {
   assert.equal(report.passed, false, `${bugId} expected gate failure`);

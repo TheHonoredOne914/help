@@ -1,3 +1,4 @@
+import { multiKeyFetch } from "../../../lib/multi-key-fetch.js";
 import { fetchWithTimeout, safeResponseText, statusFromHttp, SearchProviderError } from "../search-provider-errors.js";
 import { normalizeSearchResults } from "../search-result-normalizer.js";
 import type { SearchProvider, SearchProviderHealth } from "../search-provider-types.js";
@@ -8,7 +9,7 @@ export const tavilySearchProvider: SearchProvider = {
   async search(query, keys, options) {
     const key = keys.tavily?.trim();
     if (!key) throw new SearchProviderError("tavily", "missing_key", "Tavily API key is not configured");
-    const response = await fetchWithTimeout(options.fetchFn ?? fetch, "https://api.tavily.com/search", {
+    const response = await fetchWithTimeout(options.fetchFn ?? multiKeyFetch, "https://api.tavily.com/search", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
       body: JSON.stringify({ query: query.query, search_depth: query.mode === "web" ? "basic" : "advanced", max_results: query.maxResults ?? 10, include_answer: false }),

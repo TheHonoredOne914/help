@@ -125,6 +125,121 @@ test("post-enrichment source attrition triggers targeted repair top-up", async (
   assert.equal(result.sourceGapReport?.repairAttempted, true);
 });
 
+test("enrichmentCard and sourceChunks survive onto enrichedResults", async () => {
+  // Live fast_research debug: 45/45 citation-eligible sources had empty topChunks because
+  // enrichRetrievalBatch dropped enrichmentCard/sourceChunks when shaping RetrievalSource.
+  const contract = buildAgendaContract({
+    requestId: "preserve-enrichment-card",
+    originalUserQuery: "India Election Commission deepfakes Supreme Court regulation",
+  });
+  const base = buildBucketedQueryPlan(contract);
+  const bucket = base.buckets.find((item) => item.id === "government_official") ?? base.buckets[0]!;
+  const plan: BucketedQueryPlan = {
+    ...base,
+    buckets: [bucket],
+    queries: [{
+      id: "preserve_1",
+      bucketId: bucket.id,
+      query: "India Election Commission deepfake regulation official",
+      priority: "broad_discovery",
+      expectedDomains: bucket.preferredDomains,
+      maxResultsPerQuery: 1,
+      timeoutMs: 1000,
+    }],
+    topUpPolicy: { minCitationEligibleSources: 1, minFinalUniqueCitedSources: 1, weakBucketTopUp: false },
+  };
+  const longBody = Array.from({ length: 30 }, (_, index) => [
+    `Paragraph ${index} about Election Commission deepfake labeling duties.`,
+    "Supreme Court constitutional review and PIB circulars for Indian election integrity.",
+  ].join(" ")).join(" ");
+
+  const result = await runBucketedRetrieval(plan, {
+    mode: "fast_research",
+    live: true,
+    providers: ["tavily"],
+    providerKeys: { tavily: "tvly-test-key" },
+    maxResultsPerQuery: 1,
+    minCitationEligibleSources: 1,
+    minFinalUniqueCitedSources: 1,
+    maxSourcesToEnrich: 4,
+    extractionTimeoutMs: 1000,
+    fetchFn: async () => new Response(JSON.stringify({
+      results: [{
+        title: "ECI deepfake regulation advisory",
+        url: "https://pib.gov.in/preserve-enrichment-card",
+        content: longBody,
+      }],
+    }), { status: 200 }),
+    enrichFetchFn: async () => new Response(`<html><article>${longBody}</article></html>`, { status: 200 }),
+  });
+
+  const enriched = result.enrichedResults.find((source) => source.url.includes("preserve-enrichment-card"));
+  assert.ok(enriched, "expected enriched result");
+  assert.ok(enriched.enrichmentCard, "enrichmentCard must survive enrich→RetrievalSource");
+  assert.ok((enriched.enrichmentCard?.topChunks?.length ?? 0) > 0, "enrichmentCard.topChunks must be non-empty");
+  assert.ok((enriched.sourceChunks?.length ?? 0) > 0, "sourceChunks must survive enrich→RetrievalSource");
+});
+
+test("aggregate under target still repairs when every bucket already meets per-bucket share", async () => {
+  // Live regression: 35 eligible across healthy buckets skipped repair because
+  // perBucketTarget (ceil(40/5)=8) filtered every bucket out.
+  const contract = buildAgendaContract({
+    requestId: "aggregate-under-target-repair",
+    originalUserQuery: "India Election Commission deepfakes Supreme Court PIB press freedom regulation",
+  });
+  const base = buildBucketedQueryPlan(contract);
+  const buckets = base.buckets.slice(0, 5);
+  const plan: BucketedQueryPlan = {
+    ...base,
+    buckets,
+    queries: buckets.flatMap((bucket, bucketIndex) => Array.from({ length: 3 }, (_, index) => ({
+      id: `initial_${bucket.id}_${index + 1}`,
+      bucketId: bucket.id,
+      query: `India ${bucket.id} evidence ${bucketIndex}-${index}`,
+      priority: "broad_discovery" as const,
+      expectedDomains: bucket.preferredDomains,
+      maxResultsPerQuery: 1,
+      timeoutMs: 1000,
+    }))),
+    topUpPolicy: { minCitationEligibleSources: 8, minFinalUniqueCitedSources: 20, weakBucketTopUp: true },
+  };
+  let searchCalls = 0;
+  const events: string[] = [];
+  const longBody = Array.from({ length: 40 }, (_, index) => [
+    `Substantive evidence paragraph ${index} about Election Commission deepfake regulation.`,
+    "Supreme Court constitutional review, PIB circulars, and press freedom oversight for Indian elections.",
+  ].join(" ")).join(" ");
+
+  const result = await runBucketedRetrieval(plan, {
+    mode: "fast_research",
+    live: true,
+    providers: ["tavily"],
+    providerKeys: { tavily: "tvly-test-key" },
+    maxResultsPerQuery: 1,
+    minCitationEligibleSources: 8,
+    minFinalUniqueCitedSources: 20,
+    maxSourcesToEnrich: 40,
+    extractionTimeoutMs: 1000,
+    emit: (event) => events.push(event.type),
+    fetchFn: async () => {
+      searchCalls += 1;
+      const phase = searchCalls <= plan.queries.length ? "initial" : "repair";
+      return new Response(JSON.stringify({
+        results: [{
+          title: `ECI deepfake regulation ${phase} source ${searchCalls}`,
+          url: `https://pib.gov.in/${phase}-agg-${searchCalls}`,
+          content: longBody,
+        }],
+      }), { status: 200 });
+    },
+    enrichFetchFn: async () => new Response(`<html><article>${longBody}</article></html>`, { status: 200 }),
+  });
+
+  assert.ok(events.includes("source_enrichment_repair_started"), `expected repair; events=${events.join(",")}`);
+  assert.ok(searchCalls > plan.queries.length);
+  assert.equal(result.sourceGapReport?.repairAttempted, true);
+});
+
 test("duplicate URLs across live search providers keep the first successful provider provenance", async () => {
   const result = await runBucketedRetrieval(smallPlan(), {
     live: true,

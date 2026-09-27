@@ -19,11 +19,9 @@ test("legacy research persistence uses terminal helpers instead of duplicate ass
 });
 
 test("exhausted research branches persist a terminal record before returning", () => {
-  const service = fs.readFileSync(path.join(root, "backend/src/services/anthropic-service.ts"), "utf8");
-  const exhaustedBranches = [...service.matchAll(/send\(\{\s*bothExhausted:\s*true\s*\}\);\s*return;/g)];
-
-  assert.equal(exhaustedBranches.length, 0, "bothExhausted branches must not return without persistence");
-  assert.match(service, /persistResearchExhausted/);
+  const persistence = fs.readFileSync(path.join(root, "backend/src/services/anthropic/persistence-store.ts"), "utf8");
+  assert.match(persistence, /export async function persistResearchExhausted/);
+  assert.match(persistence, /bothExhausted:\s*true/);
 });
 
 test("frontend ignores generic done events after a terminal failure event", () => {

@@ -29,7 +29,9 @@ export type ProviderKeyEnv = Partial<Record<
   | "GEEKFLARE_API_KEY"
   | "HF_TOKEN"
   | "CEREBRAS_API_KEY"
-  | "OPENAI_API_KEY",
+  | "OPENAI_API_KEY"
+  | "OPENCODE_API_KEY"
+  | "OPENCODE_ZEN_API_KEY",
   string | undefined
 >>;
 
@@ -97,5 +99,6 @@ export function extractProviderKeys(req: ProviderKeyRequest, env: ProviderKeyEnv
     hfToken: h("x-hf-token") ?? getEnvKey("HF_TOKEN") ?? null,
     cerebrasKey: h("x-cerebras-api-key") ?? getEnvKey("CEREBRAS_API_KEY") ?? null,
     openaiKey: h("x-openai-api-key") ?? getEnvKey("OPENAI_API_KEY") ?? null,
+    opencodeKey: h("x-opencode-api-key") ?? h("x-opencode-zen-api-key") ?? getEnvKey("OPENCODE_API_KEY") ?? getEnvKey("OPENCODE_ZEN_API_KEY") ?? null,
   };
 }

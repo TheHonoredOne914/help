@@ -33,7 +33,7 @@ export interface EnrichedSource {
   fullText: string | null;
   snippet?: string | null;
   textLength: number;
-  extractionMethod: "preloaded" | "jina_reader" | "readability_fetch" | "snippet_fallback" | "failed";
+  extractionMethod: "preloaded" | "jina_reader" | "readability_fetch" | "headless_fetch" | "wayback_fetch" | "snippet_fallback" | "failed";
   extractionProvider?: ExtractionProviderName;
   extractionStatus?: "success" | "partial" | "failed";
   fallbackExtractionUsed?: boolean;
@@ -65,6 +65,9 @@ export interface SourceEnrichmentOptions {
   abortSignal?: AbortSignal;
   disabledExtractionProviders?: Set<ExtractionProviderName>;
   extractionCooldown?: ExtractionCooldownState;
+  forceApiExtraction?: boolean;
+  /** Test seam / opt-in Tier 2 (headless + wayback) overrides. */
+  tier2Overrides?: Tier2RecoveryDeps;
 }
 
 export interface SourceChunk {
@@ -121,6 +124,14 @@ export interface ExtractorResult {
   error?: string;
   contentType?: string | null;
 }
+export type Tier2RecoveryDeps = {
+  headlessEnabled?: boolean;
+  extractHeadless?: (url: string, options?: ExtractorOptions) => Promise<ExtractorResult>;
+  extractWayback?: (url: string, options?: ExtractorOptions) => Promise<ExtractorResult>;
+  renderHtml?: (url: string) => Promise<string>;
+  launchBrowser?: () => Promise<unknown>;
+};
+
 
 export interface ReducerOptions {
   fetchFn?: typeof fetch;

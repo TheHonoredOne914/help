@@ -3,8 +3,9 @@ import assert from "node:assert/strict";
 import { createLatencyBudget } from "../../src/core/latency/latency-budget.js";
 
 test("latency budgets scale by research mode", () => {
-  assert.equal(createLatencyBudget("fast_research").totalBudgetMs, 90_000);
-  assert.equal(createLatencyBudget("council").providerCallTimeoutMs, 45_000);
+  assert.equal(createLatencyBudget("fast_research").totalBudgetMs, 120_000);
+  assert.equal(createLatencyBudget("fast_research").enrichmentBudgetMs, 96_000);
+  assert.equal(createLatencyBudget("council").providerCallTimeoutMs, 180_000);
   assert.ok(createLatencyBudget("deep_research").sourceUsageBudgetMs > createLatencyBudget("fast_research").sourceUsageBudgetMs);
 });
 

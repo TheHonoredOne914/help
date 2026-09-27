@@ -15,6 +15,8 @@ export interface PipelineMetadata {
   queryHash?: string;
   researchMode?: "fast_research" | "deep_research" | "deep_research" | "council";
   terminalStatus?: PipelineTerminalStatus;
+  /** Stored run outcome. Kept when a reloaded message has no separate terminalStatus. */
+  runStatus?: PipelineTerminalStatus;
   coreGenerationUsed?: boolean;
   legacyFallbackUsed?: boolean;
   liveRetrievalUsed?: boolean;
@@ -107,6 +109,7 @@ export interface PipelineMetadataIdentity {
 export interface LegacyPipelineModel {
   key: string;
   label: string;
+  role?: string;
   searches: string[];
   found: { title: string; url: string; engine?: string; sourceType?: string }[];
   exhausted: { reason: "rate_limit" | "error" } | null;

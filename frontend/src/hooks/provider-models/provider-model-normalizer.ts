@@ -1,3 +1,4 @@
+import { isKnownUnavailableChatModel, isOpenRouterFreeModel } from "@/components/chat/provider-model-display";
 import type { ModelProviderName, ProviderModel, ProviderModels, ProviderStatusMap } from "./provider-types";
 import { MODEL_PROVIDERS } from "./provider-types";
 import { isProviderSelectableForUser } from "./provider-status-normalizer";
@@ -27,7 +28,8 @@ export function normalizeProviderModels(provider: ModelProviderName, raw: unknow
 
   for (const rawModel of extractRawModels(raw)) {
     const model = normalizeProviderModel(provider, rawModel);
-    if (!model || seen.has(model.id)) continue;
+    if (!model || seen.has(model.id) || isKnownUnavailableChatModel(model.id)) continue;
+    if (provider === "openrouter" && !isOpenRouterFreeModel(model.id) && model.badge !== "free") continue;
     seen.add(model.id);
     models.push(model);
   }
@@ -82,7 +84,9 @@ export function buildSelectableResearchModels(providerStatus: ProviderStatusMap,
     const models = providerModels[provider] ?? [];
     if (!status || models.length === 0) return [];
     if (!isProviderSelectableForUser(status, models)) return [];
-    return models.map((model) => toProviderModelId(provider, model.id)).filter(Boolean);
+    return models
+      .map((model) => toProviderModelId(provider, model.id))
+      .filter((id) => id && !isKnownUnavailableChatModel(id));
   });
 }
 

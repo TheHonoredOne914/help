@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { buildEvidenceBlockForDivision, buildEvidenceRegistry } from "../src/lib/evidence-registry.ts";
-import { enrichResults } from "../src/lib/rag.ts";
 import type { Division } from "../src/lib/division-framework.ts";
 import type { EnrichedResult } from "../src/lib/types.ts";
 
@@ -119,33 +118,4 @@ test("prsindia.org URL is classified as tier two only", () => {
   assert.equal(registry.sources[0].tier, "tier2");
   assert.equal(registry.tier2Sources.length, 1);
   assert.equal(registry.tier4Sources.length, 0);
-});
-
-test("enrichResults deep mode fetches twelve sources instead of six", async () => {
-  const originalFetch = globalThis.fetch;
-  const fetchedUrls: string[] = [];
-  globalThis.fetch = (async (url: string | URL | Request) => {
-    fetchedUrls.push(String(url));
-    return new Response("<html><body><article><p>India parliamentary evidence 2026 source content with enough text for readability extraction and scoring.</p></article></body></html>", {
-      status: 200,
-      headers: { "Content-Type": "text/html" },
-    });
-  }) as typeof fetch;
-
-  try {
-    const results = Array.from({ length: 14 }, (_, index) => ({
-      title: `Source ${index + 1}`,
-      url: `https://example.com/source-${index + 1}`,
-      snippet: "India parliamentary evidence 2026",
-      engine: "test",
-      score: 1,
-      sourceType: "general" as const,
-    }));
-
-    await enrichResults(results, "India parliamentary evidence", 6, undefined, null, "deep");
-
-    assert.equal(fetchedUrls.length, 12);
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
 });

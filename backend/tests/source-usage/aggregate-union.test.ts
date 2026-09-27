@@ -127,7 +127,7 @@ test("perRoleMinimum differs from requiredSources in policy config", () => {
   assert.equal(deep.perRoleMinimum, 20);
 
   const council = getSourceUsagePolicy("council");
-  assert.equal(council.requiredSources, 180);
+  assert.equal(council.requiredSources, 110);
   assert.equal(council.perRoleMinimum, 30);
 });
 

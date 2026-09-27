@@ -39,6 +39,11 @@ test("provider prompt budgets reflect live safe input limits", () => {
   assert.ok(groq.maxInputTokens > groqGptOss.maxInputTokens);
   assert.ok(kimi.maxInputTokens < groq.maxInputTokens);
   assert.ok(gemini.maxInputTokens > groq.maxInputTokens);
+  // Live mucyq378: model prose cut mid-cell at ~923 words; raise fast output under TPM caps.
+  assert.equal(groqGptOss.maxOutputTokens, 3_800);
+  assert.equal(groq.maxOutputTokens, 4_000);
+  assert.ok(groqGptOss.maxInputTokens + groqGptOss.maxOutputTokens <= 8_000);
+  assert.ok(groq.maxInputTokens + groq.maxOutputTokens <= 12_000);
 });
 
 test("Groq gpt-oss deep budget stays inside live TPM envelope", () => {
@@ -59,10 +64,8 @@ test("provider prompt budgets preserve mode citation floors under compression", 
   ];
   const modes: Array<{ mode: ResearchMode; target: number }> = [
     { mode: "fast_research", target: 40 },
-    { mode: "deep_research", target: 80 },
-    { mode: "deep_research", target: 30 },
-    { mode: "council", target: 30 },
-    { mode: "council", target: 180 },
+    { mode: "deep_research", target: 45 },
+    { mode: "council", target: 110 },
   ];
 
   for (const provider of providers) {

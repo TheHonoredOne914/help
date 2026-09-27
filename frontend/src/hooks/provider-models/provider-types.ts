@@ -11,7 +11,8 @@ export type ProviderName =
   | "firecrawl"
   | "brave"
   | "serper"
-  | "cerebras";
+  | "cerebras"
+  | "opencode";
 
 export type ProviderRuntimeStatusValue =
   | "missing_key"
@@ -57,11 +58,11 @@ export interface ProviderModel {
   contextWindow?: number;
 }
 
-export type ModelProviderName = "groq" | "openrouter" | "nvidia" | "github" | "gemini" | "ollama" | "cerebras";
+export type ModelProviderName = "groq" | "openrouter" | "nvidia" | "github" | "gemini" | "ollama" | "cerebras" | "opencode";
 export type ProviderModels = Record<ModelProviderName, ProviderModel[]>;
 export type ProviderStatusMap = Record<ProviderName, ProviderRuntimeStatus>;
 export type ProviderStatusPatch = Partial<ProviderStatusMap>;
 export type ProviderModelPatch = Partial<Record<ModelProviderName, ProviderModel[]>>;
 
-export const MODEL_PROVIDERS: ModelProviderName[] = ["groq", "gemini", "nvidia", "openrouter", "github", "ollama", "cerebras"];
+export const MODEL_PROVIDERS: ModelProviderName[] = ["groq", "gemini", "nvidia", "openrouter", "github", "ollama", "cerebras", "opencode"];
 export const STATUS_PROVIDERS: ProviderName[] = [...MODEL_PROVIDERS, "serper", "exa", "tavily", "brave", "firecrawl", "jina"];

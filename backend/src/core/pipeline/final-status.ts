@@ -23,20 +23,38 @@ export interface DecideFinalResearchStatusInput {
   citationStatus?: FinalStatusCitationStatus | null;
   providerError?: unknown;
   sourceUsageFailureReports?: unknown[];
+  /** When false, SourceUsageMap union missed the floor (e.g. 39/40) even if rolesFailed=0. */
+  sourceUsagePassed?: boolean;
   fallbackExplicitlyAllowed?: boolean;
   degradedFallbackUsed?: boolean;
   deterministicCitedFallbackUsed?: boolean;
   visibleAnswer?: string;
 }
 
+/** Mode-depth and length fatals are coverage gaps, not safety failures. */
+function isNonSafetyDepthFatal(issue: string): boolean {
+  if (/source_gap_bypass|hallucination|legal_accuracy|electoral|parliament_framing|claim_grounding|claim grounding|unsupported_high_risk|unsupported citation|citation validation|fake citation|template_or_thin|agenda_drift|fraud/i.test(issue)) {
+    return false;
+  }
+  return /\bmode_depth\b|\bfinal_answer_too_short\b|\bfinal_answer_too_long\b/i.test(issue);
+}
+
+function hasSafetyValidationFailure(input: DecideFinalResearchStatusInput): boolean {
+  const fatalIssues = input.qualityGate?.fatalIssues ?? [];
+  if (fatalIssues.some((issue) => !isNonSafetyDepthFatal(issue))) return true;
+  return (input.qualityGate?.automaticFailures ?? []).some((failure) =>
+    !isNonSafetyDepthFatal(failure)
+    && /\b(fatal|provider|no citations|citation validation|source contract|hallucination|legal|electoral|framing|claim grounding|unsupported citation|electoral_integrity|parliament_framing|legal_accuracy|template_or_thin)\b/i.test(failure)
+  );
+}
+
 export function decideFinalResearchStatus(input: DecideFinalResearchStatusInput): ResearchTerminalStatus {
   const citedSources = input.citationStatus?.finalUniqueCitedSources ?? input.sourceContract.finalUniqueCitedSources;
   const qualityFailed = input.qualityGate?.passed === false;
   const repairRequired = input.qualityGate?.repairRequired === true;
-  const typedFatalFailure = (input.qualityGate?.fatalIssues ?? []).length > 0;
-  const automaticFatalFailure = (input.qualityGate?.automaticFailures ?? []).some((failure) =>
-    /\b(fatal|provider|no citations|citation validation|source contract)\b/i.test(failure)
-  );
+  const typedFatalFailure = (input.qualityGate?.fatalIssues ?? []).some((issue) => !isNonSafetyDepthFatal(issue));
+  const safetyValidationFailed = hasSafetyValidationFailure(input);
+  const automaticFatalFailure = safetyValidationFailed;
   const failedSourceUsageRoles = (input.sourceUsageFailureReports ?? []).length > 0;
   const answerLooksLikeFallback = Boolean(input.visibleAnswer && /\bLegacy fallback answer retained|Research Incomplete|Core generation could not produce/i.test(input.visibleAnswer));
   const sourceUsageFailuresRecoveredWithGap =
@@ -54,8 +72,23 @@ export function decideFinalResearchStatus(input: DecideFinalResearchStatusInput)
   // No citations = always fail
   if (citedSources === 0) return "failed";
 
-  // DEPLOYMENT FIX: If we have an answer with citations and source gaps, accept it even with validation issues
-  if (citedSources > 0 && Boolean(input.sourceGapReport) && failedSourceUsageRoles && !automaticFatalFailure) {
+  // SourceUsageMap near-miss (e.g. 39/40): roles may all pass, so failureReports is empty, but
+  // aggregate.passed is false and a SourceGapReport was built. Prefer completed_with_source_gaps
+  // before the strictCompleted shortcut (smoke rejects completed + usage.passed=false).
+  if (
+    citedSources > 0
+    && Boolean(input.sourceGapReport)
+    && input.sourceUsagePassed === false
+    && input.coreGenerationUsed
+    && !input.legacyFallbackUsed
+    && !safetyValidationFailed
+    && !answerLooksLikeFallback
+  ) {
+    return "completed_with_source_gaps";
+  }
+
+  // Source-gap recovery: fewer sources than the mode wants — not a license to skip safety validation.
+  if (citedSources > 0 && Boolean(input.sourceGapReport) && failedSourceUsageRoles && !safetyValidationFailed) {
     return "completed_with_source_gaps";
   }
 
@@ -72,6 +105,7 @@ export function decideFinalResearchStatus(input: DecideFinalResearchStatusInput)
     && citedSources >= input.sourceContract.requiredSources
     && !automaticFatalFailure
     && !failedSourceUsageRoles
+    && input.sourceUsagePassed !== false
     && !answerLooksLikeFallback;
 
   if (strictCompleted) return "completed";
@@ -92,13 +126,18 @@ export function decideFinalResearchStatus(input: DecideFinalResearchStatusInput)
   if (repairRequired && input.sourceContract.status !== "passed_with_source_gaps") return "failed";
   if (qualityFailed && input.sourceContract.status !== "passed_with_source_gaps") return "failed";
   if (qualityFailed && automaticFatalFailure) return "failed";
-  // Allow completion with source gaps if we have citations, even with failed source usage roles
-  if (failedSourceUsageRoles && citedSources > 0 && Boolean(input.sourceGapReport)) return "completed_with_source_gaps";
+  // Allow completion with source gaps if we have citations and no safety validation failures
+  if (failedSourceUsageRoles && citedSources > 0 && Boolean(input.sourceGapReport) && !safetyValidationFailed) return "completed_with_source_gaps";
   if (failedSourceUsageRoles && input.sourceContract.status !== "passed_with_source_gaps" && !sourceUsageFailuresRecoveredWithGap) return "failed";
   if (answerLooksLikeFallback && !input.legacyFallbackUsed) return "failed";
 
   if (input.legacyFallbackUsed) {
-    if ((input.mode === "fast_research" || input.mode === "deep_research") && input.fallbackExplicitlyAllowed) {
+    const fullDepthContract = input.sourceContract.requiredSources > 20;
+    if (
+      (input.mode === "fast_research" || input.mode === "deep_research")
+      && input.fallbackExplicitlyAllowed
+      && !fullDepthContract
+    ) {
       return "legacy_fallback_used";
     }
     return "failed";

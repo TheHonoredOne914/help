@@ -12,7 +12,17 @@ export function runClaimGroundingGate(ctx: QualityGateRuntimeInput, thresholds: 
   const graphSourceIds = new Set(graphClaims.flatMap((claim) => claim.supportingSourceIds ?? []));
   const cited = ctx.input.uniqueCitedSourceIds;
   const groundedCitations = cited.filter((id) => approvedLedgerSourceIds.has(id) || graphSourceIds.has(id)).length;
-  const highRiskUnsupported = (graph?.unsupportedClaims ?? []).filter((issue) => issue.action === "hard_fail" || /fraud|judgment|rank|score/i.test(issue.type));
+  const highRiskUnsupported = (graph?.unsupportedClaims ?? []).filter((issue) => {
+    // unsupported_rank / unsupported_score / source_gap match /rank|score/ or the gap action.
+    // Those names are fatal only when the mode actually requires claim grounding.
+    const optionalGroundingName = issue.action === "source_gap"
+      || issue.type === "source_gap"
+      || /rank|score/i.test(issue.type);
+    if (!thresholds.requireClaimGrounding && optionalGroundingName && !/fraud|judgment/i.test(issue.type)) {
+      return false;
+    }
+    return issue.action === "hard_fail" || /fraud|judgment|rank|score/i.test(issue.type);
+  });
 
   if (thresholds.requireClaimGrounding) {
     if (graphClaims.length === 0 || ledgerItems.length === 0) {

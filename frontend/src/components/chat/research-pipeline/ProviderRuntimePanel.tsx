@@ -13,10 +13,10 @@ export function ProviderRuntimePanel({ events = [], selectedModels = [], legacyF
   if (effectiveModels.length === 0) return null;
 
   return (
-    <div className="rounded-lg border border-border/40 bg-background/70 p-2.5">
-      <p className="text-[10px] font-semibold text-muted-foreground">Model Progress</p>
+    <div className="rounded-lg border border-[var(--line)]/40 bg-[var(--surface)]/70 p-2.5">
+      <p className="text-2xs font-semibold text-[var(--slate)]">Model Progress</p>
       {effectiveModels.length > 0 && (
-        <p className="mt-1 line-clamp-2 text-[10px] text-muted-foreground break-all">
+        <p className="mt-1 line-clamp-2 text-2xs text-[var(--slate)] break-all">
           Models: {effectiveModels.join(", ")}
         </p>
       )}

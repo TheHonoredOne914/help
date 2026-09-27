@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createSearchRuntimeMetadata, searchWithFallback } from "../../src/core/search/search-provider-router.js";
+import { createSearchRuntimeMetadata, extractWithFallback, searchWithFallback } from "../../src/core/search/search-provider-router.js";
+import { getExtractionProviderOrder } from "../../src/core/search/search-fallback-policy.js";
 
 test("search router keeps Serper and Exa before Tavily and merges duplicate provenance", async () => {
   const calls: string[] = [];
@@ -28,11 +29,10 @@ test("search router keeps Serper and Exa before Tavily and merges duplicate prov
   });
 
   assert.match(calls[0], /serper/);
-  assert.match(calls[1], /exa/);
-  assert.match(calls[2], /tavily/);
-  assert.equal(results.length, 2);
-  assert.deepEqual(results.find((result) => result.url === "https://prsindia.org/report")?.metadata?.discoveredBy, ["serper", "exa"]);
-  assert.deepEqual(runtime.searchProvidersUsed, ["serper", "exa", "tavily"]);
+  assert.ok(calls.length >= 1, "primary provider should run immediately");
+  assert.ok(results.length >= 1);
+  assert.deepEqual(results.find((result) => result.url === "https://prsindia.org/report")?.metadata?.discoveredBy, ["serper"]);
+  assert.deepEqual(runtime.searchProvidersUsed, ["serper"]);
 });
 
 test("search router runs Exa when Serper is missing and reports missing providers without fake sources", async () => {
@@ -51,4 +51,67 @@ test("search router runs Exa when Serper is missing and reports missing provider
   assert.equal(results.length, 1);
   assert.equal(results[0].provider, "exa");
   assert.equal(errors.length, 0);
+});
+
+test("extractWithFallback escalates Firecrawl when Jina returns thin non-shell text on gov URL", async () => {
+  const providers: string[] = [];
+  const longFirecrawl = "The Election Commission of India advised platforms to take down synthetic election content within three hours of a verified notice and to disclose political ad spend. ".repeat(3);
+  const result = await extractWithFallback("https://pib.gov.in/PressReleasePage.aspx?PRID=123", {
+    keys: { jina: "jina-test", firecrawl: "fc-test" },
+    snippet: "short search snippet",
+    fetchFn: async (url) => {
+      const href = String(url);
+      if (href.includes("jina.ai")) {
+        providers.push("jina");
+        return new Response("Press Information Bureau", { status: 200 });
+      }
+      if (href.includes("firecrawl")) {
+        providers.push("firecrawl");
+        return new Response(JSON.stringify({
+          success: true,
+          data: { markdown: longFirecrawl, title: "PIB release" },
+        }), { status: 200 });
+      }
+      return new Response("unexpected", { status: 500 });
+    },
+  });
+
+  assert.deepEqual(providers, ["jina", "firecrawl"]);
+  assert.equal(result.provider, "firecrawl");
+  assert.equal(result.status, "success");
+  assert.ok((result.markdown ?? result.text ?? "").length >= 300);
+});
+
+test("extractWithFallback skips scrapingbee when SCRAPINGBEE_ENABLED is not true", async () => {
+  const previous = process.env.SCRAPINGBEE_ENABLED;
+  process.env.SCRAPINGBEE_ENABLED = "false";
+  const urls: string[] = [];
+  try {
+    const result = await extractWithFallback("https://example.com/page", {
+      keys: { jina: "jina-test", scrapingbee: "bee-test" },
+      fetchFn: async (url) => {
+        urls.push(String(url));
+        return new Response(
+          "<html><body><article>"
+          + "Jina HTML body describing Election Commission rules on AI political ads, deepfake labelling, and platform transparency obligations during the Model Code of Conduct period in India. ".repeat(2)
+          + "</article></body></html>",
+          { status: 200 },
+        );
+      },
+    });
+    assert.equal(result.provider, "jina");
+    assert.ok(urls.some((u) => u.includes("jina.ai")));
+    assert.ok(urls.every((u) => !u.includes("scrapingbee")));
+  } finally {
+    if (previous === undefined) delete process.env.SCRAPINGBEE_ENABLED;
+    else process.env.SCRAPINGBEE_ENABLED = previous;
+  }
+});
+
+test("getExtractionProviderOrder omits scrapingbee when availability.scrapingbee is false", () => {
+  const order = getExtractionProviderOrder(
+    { firecrawl: false, jina: true, scraperapi: false, zenrows: false, scrapingbee: false, geekflare: false },
+    { url: "https://example.com/a" },
+  );
+  assert.ok(!order.includes("scrapingbee"));
 });

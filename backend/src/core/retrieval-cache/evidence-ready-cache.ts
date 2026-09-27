@@ -43,8 +43,7 @@ function buildEvidenceKey(source: EvidenceSource, agendaFingerprint: string): st
   if (!contentHash) return null;
   return evidenceReadyCacheKey({
     schemaVersion: retrievalSchemaVersion(),
-    sourceId: source.id,
-    url: source.url,
+    url: source.canonicalUrl || source.url,
     contentHash,
     agendaFingerprint,
   });

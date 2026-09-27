@@ -1,7 +1,7 @@
 export function ensureResearchWorkerModels(
   mode: string,
   models: string[],
-  fallbackModel = "groq/llama-3.3-70b-versatile",
+  fallbackModel = "groq/openai/gpt-oss-120b",
 ): string[] {
   if (mode !== "web_search" && mode !== "deep_research") return models;
   if (models.length >= 2) return models;

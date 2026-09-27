@@ -46,7 +46,7 @@ export function isArchiveContextSafeForAgenda(archiveText: string, contract: Age
         ? "Archive overlaps the agenda but is model-generated, so it may only be background."
         : "Archive overlaps the current agenda and may be used as background."
       : "Archive context risks redefining the current user query.",
-    sanitizedArchiveText: safe ? sanitizeArchiveText(text, contract) : "",
+    sanitizedArchiveText: sanitizeArchiveText(text, contract),
     archiveCanBeCited: false,
   };
 }

@@ -46,12 +46,15 @@ export async function persistAssistantFailed(input: {
 }): Promise<AssistantPersistenceResult> {
   const title = input.title?.trim() || "Response Failed";
   const safeMessage = input.message.trim() || "The response could not be completed.";
-  const visibleContent = `${title}\n\nReason: ${safeMessage}`;
-  const content = input.metadata
-    ? embedPipelineMetadata(visibleContent, input.metadata as Record<string, unknown>)
-    : visibleContent;
-  const metadata = input.metadata as { runId?: string; terminalStatus?: ResearchTerminalStatus } | null | undefined;
-  const metadataJson = input.metadata ? JSON.stringify(input.metadata) : null;
+  const partial = input.partialContent?.trim() ?? "";
+  const failureStub = `${title}\n\nReason: ${safeMessage}`;
+  const visibleContent = partial ? `${partial}\n\n${failureStub}` : failureStub;
+  const metadataRecord = input.metadata && typeof input.metadata === "object"
+    ? { ...(input.metadata as Record<string, unknown>), failureTitle: title, failureMessage: safeMessage }
+    : { failureTitle: title, failureMessage: safeMessage };
+  const content = embedPipelineMetadata(visibleContent, metadataRecord);
+  const metadata = metadataRecord as { runId?: string; terminalStatus?: ResearchTerminalStatus };
+  const metadataJson = JSON.stringify(metadataRecord);
 
   if (input.assistantMessageId != null) {
     await input.store.updateAssistantMessage(input.assistantMessageId, content, metadataJson, metadata?.runId, metadata?.terminalStatus);

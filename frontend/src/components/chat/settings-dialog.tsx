@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Settings as SettingsIcon, Sparkles, RotateCcw, Key, RefreshCw, LogOut } from "lucide-react";
+import { Settings as SettingsIcon, Scale, RotateCcw, Key, RefreshCw, LogOut } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useProviderModels } from "@/hooks/use-provider-models";
 import { useAuth } from "@/hooks/use-auth";
@@ -21,6 +21,8 @@ import {
 
 const STORAGE_KEY = "ai-research:system-prompts:v1";
 export const AUTO_FALLBACK_STORAGE_KEY = "bestdel:auto-fallback:v1";
+/** Matches backend USER_SYSTEM_PROMPT_MAX_CHARS. The joined prompt is what the model receives. */
+export const SYSTEM_PROMPT_MAX_CHARS = 4000;
 
 export interface SystemPrompts {
   global: string;
@@ -33,16 +35,33 @@ const DEFAULT_PROMPTS: SystemPrompts = { global: "", normal: "", web_search: "",
 
 const PLACEHOLDERS: Record<keyof SystemPrompts, string> = {
   global: "Applies to all chats. e.g. 'Always respond in plain English. Be concise. Use bullet points.'",
-  normal: "Extra instructions for normal chat mode only.",
-  web_search: "Extra instructions for web search mode only.",
-  deep_research: "Extra instructions for deep research mode only.",
+  normal: "Extra instructions for Drafting only.",
+  web_search: "Extra instructions for Fast Research only.",
+  deep_research: "Extra instructions for Deep Research and Council.",
 };
+
+const PROMPT_TAB_COPY: Record<keyof SystemPrompts, { label: string; helper: string }> = {
+  global: { label: "Global", helper: "Used for every conversation in every mode." },
+  normal: { label: "Drafting", helper: "Used in Drafting and Rhetorics, combined with the global prompt." },
+  web_search: { label: "Fast", helper: "Used in Fast Research, combined with the global prompt." },
+  deep_research: { label: "Deep", helper: "Used in Deep Research and Council, combined with the global prompt." },
+};
+
+function capSystemPromptField(value: unknown): string {
+  return typeof value === "string" ? value.slice(0, SYSTEM_PROMPT_MAX_CHARS) : "";
+}
 
 export function loadSystemPrompts(): SystemPrompts {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return DEFAULT_PROMPTS;
-    return { ...DEFAULT_PROMPTS, ...JSON.parse(raw) };
+    const parsed = JSON.parse(raw) as Partial<Record<keyof SystemPrompts, unknown>>;
+    return {
+      global: capSystemPromptField(parsed.global),
+      normal: capSystemPromptField(parsed.normal),
+      web_search: capSystemPromptField(parsed.web_search),
+      deep_research: capSystemPromptField(parsed.deep_research),
+    };
   } catch {
     return DEFAULT_PROMPTS;
   }
@@ -51,7 +70,7 @@ export function loadSystemPrompts(): SystemPrompts {
 export function getSystemPromptForMode(mode: "normal" | "web_search" | "deep_research" | "fast_research" | "council"): string {
   const p = loadSystemPrompts();
   const promptKey = mode === "normal" ? "normal" : mode === "fast_research" ? "web_search" : "deep_research";
-  return [p.global.trim(), p[promptKey].trim()].filter(Boolean).join("\n\n");
+  return [p.global.trim(), p[promptKey].trim()].filter(Boolean).join("\n\n").slice(0, SYSTEM_PROMPT_MAX_CHARS);
 }
 
 export function loadAutoFallback(): boolean {
@@ -81,6 +100,7 @@ function providerKeyValue(provider: string, keys: ProviderKeys): string {
     case "exa": return keys.exaApiKey;
     case "firecrawl": return keys.firecrawlApiKey;
     case "cerebras": return keys.cerebrasApiKey;
+    case "opencode": return keys.opencodeApiKey;
     case "scraperapi": return keys.scraperapiApiKey;
     case "zenrows": return keys.zenrowsApiKey;
     case "scrapingbee": return keys.scrapingbeeApiKey;
@@ -156,11 +176,30 @@ const handleSave = async () => {
   };
 
   const handleReset = () => {
-    if (tab === "providers") setKeys(DEFAULT_PROVIDER_KEYS);
-    else setPrompts(DEFAULT_PROMPTS);
+    if (tab === "providers") {
+      setKeys(DEFAULT_PROVIDER_KEYS);
+      setSavedKeys(DEFAULT_PROVIDER_KEYS);
+      try {
+        localStorage.setItem(PROVIDER_KEY, JSON.stringify(DEFAULT_PROVIDER_KEYS));
+      } catch {
+        /* private mode */
+      }
+      window.dispatchEvent(new CustomEvent("bestdel:provider-keys-updated", {
+        detail: { keys: DEFAULT_PROVIDER_KEYS, autoFallback, changedAt: Date.now(), forceRefresh: true },
+      }));
+      void refreshAllProviders(DEFAULT_PROVIDER_KEYS);
+      return;
+    }
+    setPrompts(DEFAULT_PROMPTS);
   };
 
   const handleLogout = async () => {
+    if (!window.confirm("Sign out and remove provider keys stored in this browser?")) return;
+    try {
+      localStorage.removeItem(PROVIDER_KEY);
+    } catch {
+      /* private mode */
+    }
     await signOut();
     queryClient.clear();
     onOpenChange(false);
@@ -176,15 +215,15 @@ const handleSave = async () => {
             Settings
           </DialogTitle>
           <DialogDescription>
-            Customize the AI's behavior with system prompts, or override provider API keys for this browser session.
+            System prompts and API keys for this browser session.
           </DialogDescription>
         </DialogHeader>
 
         <Tabs value={tab} onValueChange={(v) => setTab(v as TabKey)}>
           <TabsList className="grid grid-cols-5 w-full">
             <TabsTrigger value="global" className="text-xs">Global</TabsTrigger>
-            <TabsTrigger value="normal" className="text-xs">Normal</TabsTrigger>
-            <TabsTrigger value="web_search" className="text-xs">Web</TabsTrigger>
+            <TabsTrigger value="normal" className="text-xs">Drafting</TabsTrigger>
+            <TabsTrigger value="web_search" className="text-xs">Fast</TabsTrigger>
             <TabsTrigger value="deep_research" className="text-xs">Deep</TabsTrigger>
             <TabsTrigger value="providers" className="text-xs gap-1">
               <Key className="w-3 h-3" />
@@ -195,35 +234,34 @@ const handleSave = async () => {
           {(["global", "normal", "web_search", "deep_research"] as (keyof SystemPrompts)[]).map((key) => (
             <TabsContent key={key} value={key} className="mt-3 space-y-2">
               <Label htmlFor={`sp-${key}`} className="text-xs flex items-center gap-1.5">
-                <Sparkles className="w-3 h-3 text-amber-500" />
-                System prompt — {key.replace("_", " ")}
+                <Scale className="w-3 h-3 text-[var(--brass)]" />
+                System prompt: {PROMPT_TAB_COPY[key].label}
               </Label>
               <Textarea
                 id={`sp-${key}`}
                 placeholder={PLACEHOLDERS[key]}
                 value={prompts[key]}
-                onChange={(e) => setPrompts((p) => ({ ...p, [key]: e.target.value }))}
+                maxLength={SYSTEM_PROMPT_MAX_CHARS}
+                onChange={(e) => setPrompts((p) => ({ ...p, [key]: e.target.value.slice(0, SYSTEM_PROMPT_MAX_CHARS) }))}
                 className="min-h-[160px] text-sm font-mono"
               />
-              <p className="text-[11px] text-muted-foreground">
-                {key === "global"
-                  ? "Used for every conversation in every mode."
-                  : `Only used in ${key.replace("_", " ")} mode (combined with the global prompt).`}
+              <p className="text-xs text-[var(--slate)]">
+                {PROMPT_TAB_COPY[key].helper} The combined prompt sent with a message stops at {SYSTEM_PROMPT_MAX_CHARS.toLocaleString()} characters.
               </p>
             </TabsContent>
           ))}
 
           <TabsContent value="providers" className="mt-3 space-y-4 max-h-[400px] overflow-y-auto pr-1">
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-xs text-[var(--slate)]">
               Override API keys per-request. Stored only in your browser (localStorage). Leave blank to use the
               server-side keys.
             </p>
-            <div className="flex items-center justify-between gap-3 rounded-md border border-border/60 bg-muted/20 p-3">
+            <div className="flex items-center justify-between gap-3 rounded-md border border-[var(--line)]/60 bg-[var(--surface-muted)]/20 p-3">
               <div className="min-w-0 space-y-1">
                 <Label htmlFor="auto-fallback-toggle" className="text-xs font-semibold">
                   Auto-fallback to other providers if selected provider fails
                 </Label>
-                <p className="text-[10px] text-muted-foreground">
+                <p className="text-2xs text-[var(--slate)]">
                   Off = BestDel uses only your selected model. On = BestDel may try other configured providers.
                 </p>
               </div>
@@ -235,7 +273,7 @@ const handleSave = async () => {
               />
             </div>
             <div className="flex items-center justify-between gap-2">
-              <div className="text-[10px] text-muted-foreground">
+              <div className="text-2xs text-[var(--slate)]">
                 {lastRefreshAt ? `Last refreshed ${new Date(lastRefreshAt).toLocaleTimeString()}` : "Provider status has not refreshed yet."}
               </div>
               <Button
@@ -243,28 +281,31 @@ const handleSave = async () => {
                 variant="outline"
                 size="sm"
                 onClick={() => refreshAllProviders(keys)}
-                className="h-7 gap-1.5 text-[10px]"
+                className="h-7 gap-1.5 text-2xs"
                 disabled={isRefreshing}
               >
                 <RefreshCw className={`h-3 w-3 ${isRefreshing ? "animate-spin" : ""}`} />
                 Refresh
               </Button>
             </div>
-            <div className="grid grid-cols-2 gap-2 rounded-md border border-border/60 bg-muted/20 p-2">
-              {["groq", "openrouter", "nvidia", "github", "gemini", "ollama", "cerebras", "serper", "exa", "tavily", "brave", "firecrawl", "jina", "scraperapi", "zenrows", "scrapingbee", "geekflare"].map((provider) => {
+            <div className="grid grid-cols-2 gap-2 rounded-md border border-[var(--line)]/60 bg-[var(--surface-muted)]/20 p-2">
+              {["groq", "openrouter", "nvidia", "github", "gemini", "ollama", "cerebras", "opencode", "serper", "exa", "tavily", "brave", "firecrawl", "jina", "scraperapi", "zenrows", "scrapingbee", "geekflare"].map((provider) => {
                 const health = providerStatus[provider as keyof typeof providerStatus];
                 const currentConfigured = Boolean(providerKeyValue(provider, keys).trim());
                 const savedConfigured = Boolean(providerKeyValue(provider, savedKeys).trim());
-                const effectiveConfigured = currentConfigured || savedConfigured || Boolean(health?.configured);
+                const serverConfigured = Boolean(health?.configured && health.configuredFrom === "server_env");
+                const effectiveConfigured = currentConfigured || savedConfigured || serverConfigured;
                 const dirty = providerKeyValue(provider, keys) !== providerKeyValue(provider, savedKeys);
-                const needsRefresh = effectiveConfigured && !health?.configured && !dirty;
-                const checking = Boolean(health?.checking || (isRefreshing && effectiveConfigured));
-                const tone = dirty ? "text-amber-400" : checking ? "text-sky-500" : needsRefresh ? "text-amber-400" : !effectiveConfigured ? "text-amber-500" : health?.healthy ? "text-emerald-500" : health?.status === "unverified" || health?.status === "catalog_fallback" || health?.status === "network_error" ? "text-amber-400" : "text-red-500";
-const keySource = health?.configuredFrom === "server_env" ? " (server)" : health?.configuredFrom === "browser" ? " (browser)" : "";
-if (import.meta.env.DEV) {
-  console.debug(`[settings-dialog] ${provider}: health=`, JSON.stringify(health), `status="${health?.status}" configured=${health?.configured} healthy=${health?.healthy} checking=${health?.checking} error="${health?.error}"`);
-}
-const label = dirty
+                const tracked = health != null;
+                const needsRefresh = tracked && effectiveConfigured && !health?.configured && !dirty;
+                const checking = tracked && Boolean(health?.checking || (isRefreshing && effectiveConfigured));
+                const tone = !tracked
+                  ? (dirty ? "text-amber-400" : effectiveConfigured ? "text-emerald-500" : "text-amber-500")
+                  : dirty ? "text-amber-400" : checking ? "text-sky-500" : needsRefresh ? "text-amber-400" : !effectiveConfigured ? "text-amber-500" : health?.healthy ? "text-emerald-500" : health?.status === "unverified" || health?.status === "catalog_fallback" || health?.status === "network_error" ? "text-amber-400" : "text-red-500";
+                const keySource = health?.configuredFrom === "server_env" ? " (server)" : health?.configuredFrom === "browser" ? " (browser)" : "";
+                const label = !tracked
+                  ? (dirty ? "unsaved" : effectiveConfigured ? "saved" : "missing")
+                  : dirty
   ? "unsaved"
   : checking ? "checking"
   : needsRefresh ? "not checked"
@@ -279,8 +320,8 @@ const label = dirty
   : health?.status === "checking" ? "checking"
   : (health?.error ?? "unavailable");
                 return (
-                  <div key={provider} className="flex items-center justify-between gap-2 text-[10px]">
-                    <span className="font-semibold uppercase tracking-wide text-muted-foreground">{provider}</span>
+                  <div key={provider} className="flex items-center justify-between gap-2 text-2xs">
+                    <span className="font-semibold uppercase tracking-wide text-[var(--slate)]">{provider}</span>
                     <span className={tone} title={health?.error}>
                       {label}
                       {health?.latencyMs ? ` · ${health.latencyMs}ms` : ""}
@@ -298,18 +339,18 @@ const label = dirty
               <Label htmlFor="nvidia-key" className="text-xs">NVIDIA API key</Label>
               <Input id="nvidia-key" type="password" placeholder="nvapi-..." value={keys.nvidiaApiKey}
                 onChange={(e) => setKeys((k) => ({ ...k, nvidiaApiKey: e.target.value }))} />
-              <p className="text-[10px] text-muted-foreground">
+              <p className="text-2xs text-[var(--slate)]">
                 Used for NVIDIA NIM (models at <code>integrate.api.nvidia.com/v1</code>).
               </p>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="gemini-key" className="text-xs flex items-center gap-2">
-                <span>🔵</span> Gemini API Key
+                Gemini API Key
               </Label>
               <Input id="gemini-key" type="password" placeholder="your-gemini-api-key" value={keys.geminiApiKey}
                 onChange={(e) => setKeys((k) => ({ ...k, geminiApiKey: e.target.value }))} />
-              <p className="text-[10px] text-muted-foreground">
-                Powers Gemini 2.0 Flash and 1.5 Pro. Get a free key at{" "}
+              <p className="text-2xs text-[var(--slate)]">
+                Powers Gemini. Get a free key at{" "}
                 <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="underline">
                   aistudio.google.com
                 </a>
@@ -318,14 +359,31 @@ const label = dirty
             <div className="space-y-1.5">
               <Label className="text-xs font-semibold">OpenRouter API Key</Label>
               <Input
+                id="openrouter-key"
                 type="password"
                 placeholder="sk-or-..."
                 value={keys.openrouterApiKey}
                 onChange={(e) => setKeys(k => ({ ...k, openrouterApiKey: e.target.value }))}
                 className="h-8 text-xs font-mono"
               />
-              <p className="text-[10px] text-muted-foreground">
-                Access 100+ models via <a href="https://openrouter.ai" target="_blank" rel="noopener" className="underline">openrouter.ai</a>
+              <p className="text-2xs text-[var(--slate)]">
+                Free OpenRouter models only. Add a key at{" "}
+                <a href="https://openrouter.ai" target="_blank" rel="noopener" className="underline">openrouter.ai</a>
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">OpenCode Zen API Key</Label>
+              <Input
+                id="opencode-key"
+                type="password"
+                placeholder="oc-..."
+                value={keys.opencodeApiKey}
+                onChange={(e) => setKeys(k => ({ ...k, opencodeApiKey: e.target.value }))}
+                className="h-8 text-xs font-mono"
+              />
+              <p className="text-2xs text-[var(--slate)]">
+                Free OpenCode Zen models via{" "}
+                <a href="https://opencode.ai/zen" target="_blank" rel="noopener" className="underline">opencode.ai/zen</a>
               </p>
             </div>
             <div className="space-y-1.5">
@@ -337,7 +395,7 @@ const label = dirty
                 onChange={(e) => setKeys(k => ({ ...k, githubModelsApiKey: e.target.value }))}
                 className="h-8 text-xs font-mono"
               />
-              <p className="text-[10px] text-muted-foreground">
+              <p className="text-2xs text-[var(--slate)]">
                 Used for GitHub Models API access. Token needs models access.
               </p>
             </div>
@@ -350,37 +408,37 @@ const label = dirty
                 onChange={(e) => setKeys(k => ({ ...k, cerebrasApiKey: e.target.value }))}
                 className="h-8 text-xs font-mono"
               />
-              <p className="text-[10px] text-muted-foreground">
+              <p className="text-2xs text-[var(--slate)]">
                 Ultra-fast inference via <a href="https://inference.cerebras.ai" target="_blank" rel="noopener" className="underline">Cerebras Wafer-Scale Engine</a>
               </p>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="tavily-key" className="text-xs flex items-center gap-2">
-                <span>🔍</span> Tavily API Key
+                Tavily API Key
               </Label>
               <Input id="tavily-key" type="password" placeholder="tvly-xxxxxxxxxxxxxxxx" value={keys.tavilyApiKey}
                 onChange={(e) => setKeys((k) => ({ ...k, tavilyApiKey: e.target.value }))} />
               <div className="flex flex-col gap-1">
-                {tavilyStatus === "ok"    && <span className="text-[10px] text-green-600 font-medium">✓ Connected — Tier 1 search active</span>}
-                {tavilyStatus === "error" && <span className="text-[10px] text-red-500 font-medium">✗ Invalid key — falling back to DuckDuckGo</span>}
-                {tavilyStatus === "checking" && <span className="text-[10px] text-muted-foreground">Checking…</span>}
-                <p className="text-[10px] text-muted-foreground">
-                  Powers web search. Get a free key at{" "}
+                {tavilyStatus === "ok"    && <span className="text-2xs text-green-600 font-medium">✓ Connected. Tier 1 search active</span>}
+                {tavilyStatus === "error" && <span className="text-2xs text-red-500 font-medium">✗ Invalid key</span>}
+                {tavilyStatus === "checking" && <span className="text-2xs text-[var(--slate)]">Checking…</span>}
+                <p className="text-2xs text-[var(--slate)]">
+                  Powers Fast and Deep retrieval. Get a free key at{" "}
                   <a href="https://tavily.com" target="_blank" rel="noopener noreferrer" className="underline">
                     tavily.com
                   </a>
                 </p>
               </div>
             </div>
-            <div className="border-t border-[#27272f] pt-3">
-              <p className="text-[11px] font-semibold text-[#9a9ab0]">Search Enhancement (Optional)</p>
-              <p className="text-[11px] text-[#44445a]">Extra retrieval providers for stronger Indian government, legal, and passage-level source use.</p>
+            <div className="border-t border-[var(--line)] pt-3">
+              <p className="text-xs font-semibold text-[var(--muted-ink)]">Search Enhancement (Optional)</p>
+              <p className="text-xs text-[var(--slate)]">Extra retrieval providers for stronger Indian government, legal, and passage-level source use.</p>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="serper-key" className="text-xs">Serper.dev (Google Search)</Label>
               <Input id="serper-key" type="password" placeholder="your-serper-key" value={keys.serperApiKey}
                 onChange={(e) => setKeys((k) => ({ ...k, serperApiKey: e.target.value }))} />
-              <p className="text-[11px] text-[#44445a] mt-1">
+              <p className="text-xs text-[var(--slate)] mt-1">
                 Improves Indian gov source coverage. Free tier: 2500 searches/month. https://serper.dev
               </p>
             </div>
@@ -388,7 +446,7 @@ const label = dirty
               <Label htmlFor="exa-key" className="text-xs">Exa API Key (Semantic Search)</Label>
               <Input id="exa-key" type="password" placeholder="exa_..." value={keys.exaApiKey}
                 onChange={(e) => setKeys((k) => ({ ...k, exaApiKey: e.target.value }))} />
-              <p className="text-[11px] text-[#44445a] mt-1">
+              <p className="text-xs text-[var(--slate)] mt-1">
                 Adds semantic source discovery for policy papers, legal commentary, and related reports. https://exa.ai
               </p>
             </div>
@@ -396,7 +454,7 @@ const label = dirty
               <Label htmlFor="brave-key" className="text-xs">Brave Search</Label>
               <Input id="brave-key" type="password" placeholder="BSA..." value={keys.braveApiKey}
                 onChange={(e) => setKeys((k) => ({ ...k, braveApiKey: e.target.value }))} />
-              <p className="text-[11px] text-[#44445a] mt-1">
+              <p className="text-xs text-[var(--slate)] mt-1">
                 Reliable Google alternative. Free tier: 2000 queries/month. https://brave.com/search/api
               </p>
             </div>
@@ -404,7 +462,7 @@ const label = dirty
               <Label htmlFor="jina-key" className="text-xs">Jina AI (Reader + Reranker)</Label>
               <Input id="jina-key" type="password" placeholder="jina_..." value={keys.jinaApiKey}
                 onChange={(e) => setKeys((k) => ({ ...k, jinaApiKey: e.target.value }))} />
-              <p className="text-[11px] text-[#44445a] mt-1">
+              <p className="text-xs text-[var(--slate)] mt-1">
                 Improves page extraction and source relevance. Free: 1M tokens/month. https://jina.ai
               </p>
             </div>
@@ -412,7 +470,7 @@ const label = dirty
               <Label htmlFor="firecrawl-key" className="text-xs">Firecrawl API Key (Page Extraction)</Label>
               <Input id="firecrawl-key" type="password" placeholder="fc-..." value={keys.firecrawlApiKey}
                 onChange={(e) => setKeys((k) => ({ ...k, firecrawlApiKey: e.target.value }))} />
-              <p className="text-[11px] text-[#44445a] mt-1">
+              <p className="text-xs text-[var(--slate)] mt-1">
                 Primary markdown extraction for source pages before Jina and snippet fallback. https://firecrawl.dev
               </p>
             </div>
@@ -420,7 +478,7 @@ const label = dirty
               <Label htmlFor="scraperapi-key" className="text-xs">ScraperAPI Key (Page Extraction)</Label>
               <Input id="scraperapi-key" type="password" placeholder="your-scraperapi-key" value={keys.scraperapiApiKey}
                 onChange={(e) => setKeys((k) => ({ ...k, scraperapiApiKey: e.target.value }))} />
-              <p className="text-[11px] text-[#44445a] mt-1">
+              <p className="text-xs text-[var(--slate)] mt-1">
                 Backup extraction for JS-heavy or geo-blocked pages. https://www.scraperapi.com
               </p>
             </div>
@@ -428,7 +486,7 @@ const label = dirty
               <Label htmlFor="zenrows-key" className="text-xs">ZenRows API Key (Page Extraction)</Label>
               <Input id="zenrows-key" type="password" placeholder="your-zenrows-key" value={keys.zenrowsApiKey}
                 onChange={(e) => setKeys((k) => ({ ...k, zenrowsApiKey: e.target.value }))} />
-              <p className="text-[11px] text-[#44445a] mt-1">
+              <p className="text-xs text-[var(--slate)] mt-1">
                 Optional premium proxy extraction with anti-bot bypass. https://www.zenrows.com
               </p>
             </div>
@@ -436,7 +494,7 @@ const label = dirty
               <Label htmlFor="scrapingbee-key" className="text-xs">ScrapingBee API Key (Page Extraction)</Label>
               <Input id="scrapingbee-key" type="password" placeholder="your-scrapingbee-key" value={keys.scrapingbeeApiKey}
                 onChange={(e) => setKeys((k) => ({ ...k, scrapingbeeApiKey: e.target.value }))} />
-              <p className="text-[11px] text-[#44445a] mt-1">
+              <p className="text-xs text-[var(--slate)] mt-1">
                 Optional extraction with render_js and premium proxies. https://www.scrapingbee.com
               </p>
             </div>
@@ -444,7 +502,7 @@ const label = dirty
               <Label htmlFor="geekflare-key" className="text-xs">Geekflare API Key (Page Extraction)</Label>
               <Input id="geekflare-key" type="password" placeholder="your-geekflare-key" value={keys.geekflareApiKey}
                 onChange={(e) => setKeys((k) => ({ ...k, geekflareApiKey: e.target.value }))} />
-              <p className="text-[11px] text-[#44445a] mt-1">
+              <p className="text-xs text-[var(--slate)] mt-1">
                 Optional extraction. Endpoint must be verified via GEEKFLARE_ENDPOINT_VERIFIED=true before activation. https://geekflare.com
               </p>
             </div>
@@ -458,8 +516,8 @@ const label = dirty
               <Input id="ollama-url" type="text" placeholder="https://ollama.com/v1 or http://localhost:11434/v1"
                 value={keys.ollamaBaseUrl}
                 onChange={(e) => setKeys((k) => ({ ...k, ollamaBaseUrl: e.target.value }))} />
-              <p className="text-[10px] text-muted-foreground">
-                Leave the path off — we'll add <code>/v1</code> automatically if missing.
+              <p className="text-2xs text-[var(--slate)]">
+                Leave the path off. We'll add <code>/v1</code> automatically if missing.
               </p>
             </div>
             <div className="space-y-1.5">

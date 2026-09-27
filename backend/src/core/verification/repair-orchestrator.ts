@@ -1,6 +1,8 @@
 import { repairAgendaDrift, type AgendaContract } from "../agenda/agenda-contract.js";
 import type { EvidencePack } from "../evidence/evidence-pack-builder.js";
 import { repairCitationTextWithEvidencePacks } from "../evidence/evidence-pack-builder.js";
+import { countProseWords } from "../quality-gate/quality-gate-input.js";
+import { isEvidenceShell } from "../retrieval/enrichment/source-quality.js";
 
 export type RepairType =
   | "agenda_drift_repair"
@@ -21,6 +23,8 @@ export type RepairType =
 export interface TargetedRepairOptions {
   /** Hard word cap for length_trim_repair (mode-dependent). */
   maxWords?: number;
+  /** Soft word floor for length_repair (mode-dependent). */
+  minWords?: number;
 }
 
 export async function runTargetedRepair(
@@ -56,8 +60,15 @@ export async function runTargetedRepair(
   if (repairType === "legal_accuracy_repair") {
     return text
       .replace(/\bArticle\s+\d+\s+and\s+Article\s+\d+\s+proportionality\b/gi, "rights-based proportionality review")
-      .replace(/\bArticle\s+\d+\b/gi, "rights provision")
+      .replace(/\bArticle\s+\d+\b/gi, "constitutional protections")
       .replace(/\bSupreme Court doctrine\b/gi, "verified institutional standard")
+      .replace(/\bSupreme Court(?:'s)?\b/gi, "verified institutional")
+      .replace(/\bHigh Court(?:'s)?\b/gi, "verified institutional")
+      .replace(/\bConstitutional Duty Under (?:rights provision|constitutional rights duty|constitutional protections)\b/gi, "Constitutional public-health duty")
+      .replace(/\bUnder (?:rights provision|constitutional rights duty)\b/gi, "under constitutional rights protections")
+      .replace(/\bconstitutional rights duty rights\b/gi, "constitutional rights protections")
+      .replace(/\bconstitutional rights duty\b/gi, "constitutional rights protections")
+      .replace(/\bright to life under constitutional (?:rights duty|protections)\b/gi, "right to life under constitutional rights protections")
       .replace(/\bcourt-backed\b/gi, "source-backed")
       .replace(/\bcourt holding\b/gi, "verified source record")
       .replace(/\b[A-Z][A-Za-z.\u00a0 ]+\s+v\.?\s+(?:State of [A-Z][A-Za-z.\u00a0 ]+|Union(?: of India)?|India|Election Commission(?: of India)?|[A-Z][A-Za-z.\u00a0 ]+)/g, "a source-backed case reference")
@@ -104,25 +115,61 @@ Prescription: Tie every Treasury Bench defence and Opposition attack to a regist
 Warning: Do not treat allegations as proven, do not use UN framing, and do not cite sources that are not present in the registry.`;
   }
   if (repairType === "length_repair") {
-    // Honestly extend the answer with bullet-led, cited claims drawn from
-    // existing evidence packs. No padding, no invented facts: every appended
-    // bullet must reference a card already in `evidencePacks`.
-    if (/##?\s+Additional Source-Backed Bullets/i.test(text)) return text;
+    // Extend with debate-ready claim→use bullets from packs. Never dump scrape chrome.
     const cards = evidencePacks.flatMap((pack) => pack.cards);
     if (cards.length === 0) return text;
+    const existingIds = new Set(
+      [...text.matchAll(/\[Source\s+(\d+)\]/gi)].map((match) => Number(match[1])).filter((id) => Number.isFinite(id)),
+    );
+    const minWords = Math.max(0, opts.minWords ?? 0);
+    const ranked = [...cards].sort((a, b) => {
+      const quality = (card: typeof a) =>
+        (card.extractionQuality === "full" ? 40 : card.extractionQuality === "partial" ? 20 : card.extractionQuality === "snippet" ? 5 : 0)
+        + (card.citationStrength === "strong" ? 30 : card.citationStrength === "medium" ? 20 : 5)
+        + (card.limitedSource ? -15 : 0)
+        + Math.min(12, (card.keyFacts?.length ?? 0) * 3);
+      return quality(b) - quality(a);
+    });
     const seen = new Set<number>();
     const bullets: string[] = [];
-    for (const card of cards) {
-      if (seen.has(card.sourceId)) continue;
+    const usedBuckets = new Set<string>();
+    const takeCard = (card: (typeof cards)[number], allowWeak = false): boolean => {
+      if (seen.has(card.sourceId)) return false;
+      if (card.extractionQuality === "failed") return false;
+      if (card.citationStrength === "ineligible") return false;
+      if (!allowWeak && (card.extractionQuality === "snippet" || card.limitedSource || card.citationStrength === "weak")) return false;
+      const bullet = formatDebateLengthBullet(card);
+      if (!bullet) return false;
       seen.add(card.sourceId);
-      const fact = (card.keyFacts && card.keyFacts[0]) || card.debateUse || card.title;
-      if (!fact) continue;
-      const citation = `[Source ${card.sourceId}]`;
-      bullets.push(`- ${fact.trim().replace(/\s+/g, " ")} ${citation}`);
-      if (bullets.length >= 60) break;
+      bullets.push(bullet);
+      for (const bucket of card.bucketIds) usedBuckets.add(bucket);
+      return true;
+    };
+    for (const card of ranked) {
+      if (card.bucketIds.some((bucket) => !usedBuckets.has(bucket))) takeCard(card, false);
+      if (bullets.length >= 40) break;
+    }
+    for (const card of ranked) {
+      takeCard(card, false);
+      const draft = `${text.trim()}\n\n## Additional Source-Backed Bullets\nDebate-ready, cited claim→mechanism points from the EvidenceRegistry:\n${bullets.join("\n")}`;
+      if (minWords > 0 && countProseWords(draft) >= minWords && bullets.length >= Math.max(12, existingIds.size > 0 ? 8 : 20)) break;
+      if (bullets.length >= 220) break;
+    }
+    if (minWords > 0 && countProseWords(`${text.trim()}\n${bullets.join("\n")}`) < minWords) {
+      for (const card of ranked) {
+        takeCard(card, true);
+        const draft = `${text.trim()}\n\n## Additional Source-Backed Bullets\nDebate-ready, cited claim→mechanism points from the EvidenceRegistry:\n${bullets.join("\n")}`;
+        if (countProseWords(draft) >= minWords) break;
+        if (bullets.length >= 220) break;
+      }
     }
     if (bullets.length === 0) return text;
-    return `${text.trim()}\n\n## Additional Source-Backed Bullets\nDebate-ready, cited points drawn from the retrieved EvidenceRegistry:\n${bullets.join("\n")}`;
+    const section = `## Additional Source-Backed Bullets\nDebate-ready, cited claim→mechanism points from the EvidenceRegistry:\n${bullets.join("\n")}`;
+    if (/##?\s+Additional Source-Backed Bullets/i.test(text)) {
+      if (minWords > 0 && countProseWords(text) >= minWords) return text;
+      return insertSectionBeforeLedger(text, bullets.join("\n"), { appendOnly: true });
+    }
+    return insertSectionBeforeLedger(text, section, { appendOnly: false });
   }
   if (repairType === "length_trim_repair") {
     const maxWords = Math.max(1, opts.maxWords ?? 5500);
@@ -148,15 +195,17 @@ Warning: Do not treat allegations as proven, do not use UN framing, and do not c
  * injects unsourced text. Safe to run repeatedly.
  */
 function trimAnswerToWordCap(text: string, maxWords: number): string {
-  const countWords = (s: string) => (s.trim().match(/\b[\w'-]+\b/g) ?? []).length;
-  if (countWords(text) <= maxWords) return text;
+  if (countProseWords(text) <= maxWords) return text;
+
+  const notice = `\n\n## Trim Notice\nMode word-cap of ${maxWords} words enforced; trailing content was removed to keep the answer within the configured range. No citations or claims from the kept body were altered.`;
+  const bodyBudget = Math.max(1, maxWords - countProseWords(notice));
 
   const paragraphs = text.split(/\n{2,}/);
   const kept: string[] = [];
   let running = 0;
   for (const para of paragraphs) {
-    const w = countWords(para);
-    if (running + w > maxWords) break;
+    const w = countProseWords(para);
+    if (running + w > bodyBudget) break;
     kept.push(para);
     running += w;
   }
@@ -164,25 +213,84 @@ function trimAnswerToWordCap(text: string, maxWords: number): string {
   let body: string;
   if (kept.length === 0) {
     // Hard cut at word boundary; first paragraph alone was over cap.
-    const tokens = text.split(/\s+/);
-    const sliced: string[] = [];
-    let count = 0;
-    for (const tok of tokens) {
-      if (/\b[\w'-]+\b/.test(tok)) {
-        if (count >= maxWords) break;
-        count += 1;
-      }
-      sliced.push(tok);
-    }
-    body = sliced.join(" ").trim();
+    // Prefer keeping markdown link text; drop bare URLs so the cut matches prose counting.
+    const tokens = text
+      .replace(/!\[([^\]]*)\]\((https?:\/\/[^)]+|www\.[^)]+)\)/gi, "$1")
+      .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+|www\.[^)]+)\)/gi, "$1")
+      .replace(/https?:\/\/\S+/gi, " ")
+      .replace(/\bwww\.\S+/gi, " ")
+      .split(/\s+/)
+      .filter(Boolean);
+    body = tokens.slice(0, bodyBudget).join(" ").trim();
   } else {
     body = kept.join("\n\n").trim();
   }
 
-  return `${body}\n\n## Trim Notice\nMode word-cap of ${maxWords} words enforced; trailing content was removed to keep the answer within the configured range. No citations or claims from the kept body were altered.`;
+  return `${body}${notice}`;
 }
 
+/** Prefer placing length bullets before Citation Ledger so analysis stays contiguous. */
+function insertSectionBeforeLedger(
+  text: string,
+  section: string,
+  opts: { appendOnly: boolean },
+): string {
+  const trimmed = text.trim();
+  const match = trimmed.match(/\n##\s+Citation Ledger\b/i);
+  if (!match || match.index == null) {
+    return opts.appendOnly ? `${trimmed}\n${section}` : `${trimmed}\n\n${section}`;
+  }
+  const head = trimmed.slice(0, match.index).trimEnd();
+  const tail = trimmed.slice(match.index).trimStart();
+  if (opts.appendOnly && /##?\s+Additional Source-Backed Bullets/i.test(head)) {
+    return `${head}\n${section}\n\n${tail}`;
+  }
+  return `${head}\n\n${section}\n\n${tail}`;
+}
 
+/** Reject scrape chrome; keep short claim + debate-use mechanism for length_repair bullets. */
+function cleanEvidenceClaim(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  let text = raw
+    .replace(/!\[[^\]]*\]\([^)]+\)/g, " ")
+    .replace(/\[[^\]]*\]\((https?:\/\/[^)]+|www\.[^)]+)\)/gi, " ")
+    .replace(/https?:\/\/\S+/gi, " ")
+    .replace(/^#+\s*/gm, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text || isEvidenceShell(text)) return null;
+  // Drop leading SEO title spam before first sentence-ish clause.
+  const sentence = text.split(/(?<=[.!?])\s+/)[0] ?? text;
+  text = sentence.length >= 40 ? sentence : text;
+  if (text.length > 220) {
+    text = `${text.slice(0, 220).replace(/\s+\S*$/, "").trim()}…`;
+  }
+  if (text.length < 40) return null;
+  if (/^[-*#\d.\s]+$/.test(text)) return null;
+  return text;
+}
+
+function formatDebateLengthBullet(card: {
+  sourceId: number;
+  title?: string;
+  keyFacts?: string[];
+  keyNumbers?: string[];
+  debateUse?: string;
+  contentPreview?: string;
+}): string | null {
+  const facts = (card.keyFacts ?? []).map((fact) => cleanEvidenceClaim(fact)).filter(Boolean) as string[];
+  const numberClaim = cleanEvidenceClaim(card.keyNumbers?.[0]);
+  const claim = facts[0] ?? numberClaim ?? cleanEvidenceClaim(card.debateUse) ?? cleanEvidenceClaim(card.contentPreview);
+  if (!claim) return null;
+  const mechanism = cleanEvidenceClaim(card.debateUse)
+    ?? cleanEvidenceClaim(facts[1])
+    ?? "Use this record for a Treasury/Opposition exchange, POI, or amendment demand.";
+  // Avoid duplicating the same sentence as claim + mechanism.
+  const mechanismLine = mechanism.toLowerCase() === claim.toLowerCase()
+    ? "Grounds a sourced floor exchange on the cited record."
+    : mechanism.slice(0, 180);
+  return `- **Claim:** ${claim} **Mechanism/use:** ${mechanismLine} [Source ${card.sourceId}]`;
+}
 
 export function buildRepairPromptTemplate(repairType: RepairType): string {
   const templates: Record<RepairType, string> = {

@@ -16,13 +16,21 @@ export function validateSourceUsageMap(
   allowDeterministicExtractionFallback = false,
 ): SourceUsageValidationReport {
   const requiredCount = typeof contractOrRequiredCount === "number" ? contractOrRequiredCount : requiredCountOverride ?? contractOrRequiredCount.minimumEvidenceCardsPerModel;
+  const available = evidenceRegistry.getCitationEligibleCount();
+  const availableBuckets = new Set(
+    evidenceRegistry.getCitationEligibleSources().flatMap((source) => source.bucketIds),
+  );
   const broadBucketRequirement =
     typeof contractOrRequiredCount === "number"
       ? 0
       : requiredCount >= 20
-        ? Math.min(9, requiredCount, contractOrRequiredCount.requiredSourceBuckets.length)
+        ? Math.min(
+          9,
+          requiredCount,
+          contractOrRequiredCount.requiredSourceBuckets.length,
+          Math.max(1, availableBuckets.size),
+        )
         : 0;
-  const available = evidenceRegistry.getCitationEligibleCount();
   const effectiveRequired = Math.min(requiredCount, available);
   const roleName = modelOutput.roleName;
   const structuredFailures: StructuredSourceUsageFailure[] = [];
@@ -213,7 +221,7 @@ function repeatedGenericClaimFailure(modelOutput: ModelRoleOutput, allowDetermin
   const claimCounts = new Map<string, number>();
   for (const claim of extractedClaims) claimCounts.set(claim, (claimCounts.get(claim) ?? 0) + 1);
   for (const [claim, count] of claimCounts) {
-    const absoluteThreshold = allowDeterministicExtractionFallback ? Infinity : 5;
+    const absoluteThreshold = allowDeterministicExtractionFallback ? 8 : 5;
     if (count >= absoluteThreshold || (modelOutput.sourceUsageMap.length >= 30 && count >= Math.ceil(modelOutput.sourceUsageMap.length * 0.25))) {
       return sourceUsageFailure("repeated_generic_claim", modelOutput.roleName, `same generic claim repeated for many unrelated sources: ${claim.slice(0, 80)}`);
     }

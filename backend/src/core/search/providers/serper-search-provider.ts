@@ -1,3 +1,4 @@
+import { multiKeyFetch } from "../../../lib/multi-key-fetch.js";
 import { fetchWithTimeout, safeResponseText, statusFromHttp, SearchProviderError } from "../search-provider-errors.js";
 import { normalizeSearchResults } from "../search-result-normalizer.js";
 import type { SearchProvider, SearchProviderHealth, SearchProviderKeys, SearchProviderOptions, SearchQuery } from "../search-provider-types.js";
@@ -10,7 +11,7 @@ export const serperSearchProvider: SearchProvider = {
     if (!key) throw new SearchProviderError("serper", "missing_key", "Serper API key is not configured");
     const endpoint = query.mode === "news" ? "https://google.serper.dev/news" : "https://google.serper.dev/search";
     const q = withDomainFilters(query.query, query.domains, query.excludeDomains);
-    const response = await fetchWithTimeout(options.fetchFn ?? fetch, endpoint, {
+    const response = await fetchWithTimeout(options.fetchFn ?? multiKeyFetch, endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-API-KEY": key },
       body: JSON.stringify({ q, num: Math.min(query.maxResults ?? 10, 20), gl: query.country ?? "in", hl: query.locale ?? "en" }),

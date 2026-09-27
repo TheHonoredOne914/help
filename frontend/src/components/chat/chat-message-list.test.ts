@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import {
   buildCitationParts,
   prepareMessageForCopy,
-} from "./chat-message-list";
+} from "./citation-parts";
+import { citationPartsToMarkdown } from "./research-answer-body";
 
 const contentWithMetadata = `Answer [1].
 
@@ -17,7 +18,7 @@ test("copy preparation strips hidden pipeline metadata", () => {
 
 test("citation parts prefer backend citationStatus over regex-only linking", () => {
   const parts = buildCitationParts({
-    content: "Claim [1]. Unsupported marker [2].",
+    content: "Claim [Source 1]. Unsupported marker [2].",
     sources: [
       { sourceId: 1, title: "PIB", url: "https://pib.gov.in/brief" },
       { sourceId: 2, title: "Blog", url: "https://example.com/blog" },
@@ -35,4 +36,16 @@ test("citation parts prefer backend citationStatus over regex-only linking", () 
 
   assert.deepEqual(linked, ["1"]);
   assert.match(plain, /\[2\]/);
+});
+
+test("citationPartsToMarkdown turns trusted citations into markdown links", () => {
+  const { markdown, sourcesBlock } = citationPartsToMarkdown(
+    "## Finding\n\nClaim [Source 1] holds.\n\n## Sources\n1. https://pib.gov.in/brief",
+    [{ sourceId: 1, title: "PIB", url: "https://pib.gov.in/brief" }],
+    null,
+  );
+
+  assert.match(markdown, /\[1\]\(https:\/\/pib\.gov\.in\/brief\)/);
+  assert.match(markdown, /## Finding/);
+  assert.ok(sourcesBlock?.includes("pib.gov.in"));
 });

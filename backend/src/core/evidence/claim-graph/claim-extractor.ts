@@ -23,7 +23,7 @@ function base(source: EvidenceSource, text: string, validationStatus: RawClaimIn
     sourceId: source.id,
     sourceClass: source.sourceClass,
     citationStrength: source.citationStrength,
-    extractionQuality: source.keyFacts.every((fact) => /^title-only relevance:/i.test(fact.trim())) ? "title_only" : source.extractionQuality,
+    extractionQuality: source.keyFacts.length > 0 && source.keyFacts.every((fact) => /^title-only relevance:/i.test(fact.trim())) ? "title_only" : source.extractionQuality,
     confidence: source.confidence,
     validationStatus,
     bucketIds: source.bucketIds,

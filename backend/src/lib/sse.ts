@@ -32,7 +32,9 @@ export function createSseWriter(res: WritableSseResponse) {
 
   const sendTerminalError = (payload: TerminalErrorPayload): void => {
     if (res.writableEnded) return;
-    sendEvent({ ...payload });
+    // Carry explicit terminal fields so clients classify this as a terminal
+    // failure event instead of an opaque data event followed by a bare done.
+    sendEvent({ eventType: "provider_error", terminalStatus: "provider_error", done: true, ...payload });
     finishStream();
   };
 

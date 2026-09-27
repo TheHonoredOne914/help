@@ -47,8 +47,8 @@ export function searchResultCacheKey(input: { schemaVersion: number; provider: s
   return retrievalCacheKey(["search_result", input.schemaVersion, input.provider, normalizeQuery(input.query), input.mode, input.topicType, input.bucket, input.maxResults]);
 }
 
-export function urlExtractionCacheKey(input: { schemaVersion: number; provider?: string; url: string; freshness?: string }): string {
-  return retrievalCacheKey(["url_extraction", input.schemaVersion, canonicalizeUrl(input.url)]);
+export function urlExtractionCacheKey(input: { schemaVersion: number; provider?: string; url: string; freshness?: string; extractorSetVersion?: number }): string {
+  return retrievalCacheKey(["url_extraction", input.schemaVersion, input.extractorSetVersion ?? "", canonicalizeUrl(input.url)]);
 }
 
 export function normalizedSourceCacheKey(input: { schemaVersion: number; url: string; identifier?: string }): string {
@@ -57,7 +57,8 @@ export function normalizedSourceCacheKey(input: { schemaVersion: number; url: st
 
 export function evidenceReadyCacheKey(input: { schemaVersion: number; sourceId?: number | string; url?: string; contentHash?: string; agendaFingerprint?: string }): string {
   if (!input.contentHash) throw new Error("evidenceReadyCacheKey requires a non-empty contentHash");
-  return retrievalCacheKey(["evidence_ready", input.schemaVersion, input.sourceId ?? "", input.url ? canonicalizeUrl(input.url) : "", input.contentHash, input.agendaFingerprint ?? "global"]);
+  // Key by canonicalUrl + contentHash + schema + agenda — not sourceId (sequential IDs break cross-run hits).
+  return retrievalCacheKey(["evidence_ready", input.schemaVersion, input.url ? canonicalizeUrl(input.url) : "", input.contentHash, input.agendaFingerprint ?? "global"]);
 }
 
 export function providerHealthCacheKey(input: { schemaVersion: number; provider: string; stage: "search" | "extraction"; scope?: string }): string {

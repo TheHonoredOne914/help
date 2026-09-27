@@ -15,11 +15,17 @@ export function evaluateSourceContract(input: EvaluateSourceContractInput): Pipe
   const requiredSources = Math.max(0, input.requiredSources);
   const citationEligibleSources = Math.max(0, input.citationEligibleSources);
   const finalUniqueCitedSources = Math.max(0, input.finalUniqueCitedSources);
-  const passedStrict = finalUniqueCitedSources >= requiredSources && requiredSources > 0;
   const hasSourceGapReport = Boolean(input.sourceGapReport);
-  const allowsPartial = input.mode === "fast_research" || input.mode === "deep_research";
+  // Citation floor alone is not a strict pass when a SourceGapReport exists — e.g.
+  // SourceUsageMap 39/40 with 40 unique cites must stay passed_with_source_gaps so
+  // decideFinalResearchStatus emits completed_with_source_gaps (smoke accepts that).
+  const metCitationFloor = finalUniqueCitedSources >= requiredSources && requiredSources > 0;
+  const passedStrict = metCitationFloor && !hasSourceGapReport;
+  const allowsPartial = input.mode === "fast_research" || input.mode === "deep_research" || input.mode === "council";
   const hasAnyEvidence = finalUniqueCitedSources > 0;
-  const passedWithSourceGaps = !passedStrict && allowsPartial && hasSourceGapReport && hasAnyEvidence;
+  const nearZeroEvidence = finalUniqueCitedSources > 0
+    && finalUniqueCitedSources < Math.max(3, Math.ceil(requiredSources * 0.15));
+  const passedWithSourceGaps = !passedStrict && allowsPartial && hasSourceGapReport && hasAnyEvidence && !nearZeroEvidence;
   const status = passedStrict ? "passed" : passedWithSourceGaps ? "passed_with_source_gaps" : "failed";
 
   return {

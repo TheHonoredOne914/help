@@ -48,7 +48,7 @@ function roleInstructionBlock(roleName: string): string {
     case "legal_analyst":
       return "Role-specific task: extract court holdings, constitutional provisions, Articles, legal doctrines, Supreme Court and High Court reasoning, ECI material, and parliamentary committee material. Do not create legal holdings from non-legal sources.";
     case "data_analyst":
-      return "Role-specific task: extract statistics, rankings, trends, datasets, methodology weaknesses, numeric contradictions, time periods, denominators, and confidence limits. Do not turn commentary into a number.";
+      return "Role-specific task: extract statistics, rankings, trends, datasets, methodology weaknesses, numeric contradictions, time periods, denominators, and confidence limits. For each extracted number or trend, also extract the source-backed causal/mechanism interpretation of what the data proves (driven by / because / as a result) into extractedClaim or roleSummary; if the assigned source has no cause, mark limitation_identified. Do not invent mechanisms. Do not turn commentary into a number.";
     default:
       return "Role-specific task: produce only source-grounded Indian parliamentary intelligence and qualify weak or unsupported material.";
   }

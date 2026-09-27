@@ -30,7 +30,7 @@ export function buildCoreAnswerSystemPrompt(input: CoreResearchAnswerInput): str
     ? (input.evidenceRegistry.getSourcesByClass("court_primary").length > 0
        || input.evidenceRegistry.getSourcesByClass("legal_commentary").length > 0)
     : false;
-  return [
+  const system = [
     "You are BestDel. If asked who founded or built you: BestDel was founded by Carren Mathew Joseph. Dhruv Sharma Mahate made great contributions in the later stages of development. Do not attribute authorship to anyone else.",
     "You are BestDel's thesis-level Indian Mock Parliament research generator.",
     committeePrompt,
@@ -41,10 +41,13 @@ export function buildCoreAnswerSystemPrompt(input: CoreResearchAnswerInput): str
     "Cite only exact registry citation tokens like [Source 1](https://...). Never invent citations.",
     "Do not assert unsupported legal holdings or electoral fraud claims. For EVM/VVPAT allegations, distinguish allegation, judicial record, ECI defence, and evidentiary threshold.",
     hasLegalSources
-      ? "Use court, Article, or doctrine language only where the registry or ClaimLedger actually supports it."
-      : "Do not mention Articles, court holdings, or Supreme Court doctrine unless the retrieved registry contains legal sources for that claim.",
+      ? "Use court, Article, or doctrine language only where the registry or ClaimLedger actually supports that claim. Never invent a Supreme Court holding, Article number, or case name."
+      : "Do not mention Articles, court holdings, Supreme Court, or High Court unless the retrieved registry contains court_primary or legal_commentary sources that support that claim.",
     "If SourceGapReport exists, state the limitation visibly instead of pretending the source target was met.",
+    "If SourceGapReport is none, CompactSources are authoritative: never invent empty buckets, a single-source scrape, or a Source-Gap Notice. Evidence Landscape must list real CompactSources by bucket with in-body [Source N] citations — not 'none in the current scrape'.",
+    "DATA→ANALYSIS RULE: Raw numbers, rankings, and trends are useless without interpretation. After every material statistic or trend, state what the data proves in causal/mechanism terms (driven by / because / as a result of), using only registry-backed causes. Example shape: 'X rose to Y% [Source N] because Z mechanism [Source M],' never a bare X% dump. If sources do not support a cause, say the mechanism is unproven instead of inventing one.",
   ].join("\n");
+  return system;
 }
 
 export function buildCoreAnswerUserPrompt(input: CoreResearchAnswerInput): string;
@@ -194,20 +197,27 @@ export function buildCoreAnswerOutputContract(input: CoreResearchAnswerInput): s
     input.agendaContract.minimumUniqueCitedSources,
     input.evidenceRegistry.getCitationEligibleCount(),
   );
-  return [
+  const contract = [
     ...buildSectionPlan(input.agendaContract, input.dimensionWeights).map((section) => `# ${section}`),
     input.sourceGapReport ? "# SourceGapReport" : "",
     requestedMinimumWords,
     wordContract,
-    `Citation contract: cite at least ${citationTarget} unique registry sources if ${citationTarget} sources are included. Use bullet-led sections and attach citations to claims, not only at the end.`,
+    `Citation contract: cite at least ${citationTarget} unique registry sources if ${citationTarget} sources are included. Attach citations inside the analytical body (not only a trailing ledger). Target ≥10 distinct [Source N] citations woven into mechanisms, Treasury/Opposition, and motions.`,
+    citationTarget >= 10
+      ? `Body-citation floor: before any Citation Ledger, the analytical body must already cite ≥10 distinct CompactSources across ≥2 buckets. A trailing ledger alone does not satisfy this.`
+      : "",
     "Every major claim needs registry citations. D7 debate utility must include Treasury Bench, Opposition, POIs, rebuttals, motions, amendments, and resolution clauses. D11/final synthesis must diagnose strategy, not summarize.",
+    "Analysis contract: do not dump orphan statistics. For each material number, ranking, or trend, follow immediately with mechanism analysis of what the data proves (because / driven by / as a result), cited only when sources support the cause; otherwise mark the mechanism as unproven.",
+    "Chart contract: when the body cites ≥2 comparable registry-backed numbers (same unit/metric across groups or time), emit exactly one fenced ```bestdel-chart JSON block immediately after that analysis paragraph. Schema: {\"type\":\"bar\"|\"line\"|\"pie\",\"title\":\"...\",\"xKey\":\"label\",\"series\":[{\"key\":\"value\",\"label\":\"%\"}],\"data\":[{\"label\":\"...\",\"value\":n}],\"cite\":N}. Use only numbers already stated and cited in prose; never invent chart values. Skip charts if fewer than 2 comparable numbers.",
+    "Depth contract: expand each mechanism and each bench angle into multi-bullet substantive analysis so body prose alone approaches the word floor before any appendix. Cover every major facet of the user query; if a facet lacks sources, state the limitation explicitly.",
   ].filter(Boolean).join("\n");
+  return contract;
 }
 
 function outputWordContract(mode: CoreResearchAnswerInput["mode"]): string {
-  if (mode === "fast_research") return "Word contract: minimum 1000 words, bullet-prioritized, dense and debate-usable.";
-  if (mode === "deep_research") return "Word contract: minimum 2000 words and maximum 3000 words; use bullets, sub-bullets in prose paragraphs are allowed only where necessary.";
-  if (mode === "council") return "Word contract: minimum 3000 words and maximum 5500 words; show the council-style debate and sourced disagreements.";
+  if (mode === "fast_research") return "Word contract: minimum 1000 prose words in the analytical body (citation URLs do not count). Prefer expanding mechanisms and bench arguments over trailing source dumps.";
+  if (mode === "deep_research") return "Word contract: minimum 2000 and maximum 3000 prose words (citation URLs do not count); use bullets, sub-bullets in prose paragraphs are allowed only where necessary.";
+  if (mode === "council") return "Word contract: minimum 3000 and maximum 5500 prose words (citation URLs do not count); show the council-style debate and sourced disagreements.";
   return "";
 }
 

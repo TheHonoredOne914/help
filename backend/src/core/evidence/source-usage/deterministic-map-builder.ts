@@ -115,6 +115,7 @@ function usageItemFromCard(card: EvidenceCard): SourceUsageMapItem {
 
 function isCardCountCandidate(card: EvidenceCard): boolean {
   if (card.extractionQuality === "failed") return false;
+  if (card.limitedSource === true || card.extractionQuality === "snippet") return false;
   if (card.citationStrength === "strong" || card.citationStrength === "medium") return true;
   const texts = [
     card.contentPreview,

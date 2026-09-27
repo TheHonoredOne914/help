@@ -58,6 +58,6 @@ test("buildEnrichmentCard marks snippet fallback as limited and weak at best", (
   }], "Parliament");
 
   assert.equal(card.limitedSource, true);
-  assert.equal(card.citationEligible, false);
-  assert.equal(card.citationStrength, "ineligible");
+  assert.equal(card.citationEligible, true);
+  assert.equal(card.citationStrength, "weak");
 });

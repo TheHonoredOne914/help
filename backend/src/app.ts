@@ -5,6 +5,7 @@ import pinoHttp from "pino-http";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import path from "node:path";
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { Request } from "express";
 import router from "./routes/index.js";
@@ -13,7 +14,24 @@ import { ProviderRouterError } from "./lib/provider-router.js";
 import { QueueFullError } from "./lib/request-queue.js";
 import { config } from "./config.js";
 import { getSupabaseClient, hasSupabaseConfig } from "./db.js";
-import { LOCAL_DEV_USER_ID, decodeJwtPayload } from "./lib/request-auth.js";
+import { LOCAL_DEV_USER_ID } from "./lib/request-auth.js";
+
+function resolveFrontendDist(): string | null {
+  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    process.env.FRONTEND_DIST?.trim(),
+    path.resolve(moduleDir, "../../frontend/dist/public"), // backend/dist → repo/frontend
+    path.resolve(moduleDir, "../../../frontend/dist/public"), // nested layouts
+    path.resolve(process.cwd(), "frontend/dist/public"),
+    path.resolve(process.cwd(), "../frontend/dist/public"),
+  ].filter((value): value is string => Boolean(value));
+
+  for (const candidate of candidates) {
+    if (existsSync(path.join(candidate, "index.html"))) return candidate;
+  }
+  return null;
+}
+
 
 // Conditional Redis store for distributed rate limiting
 async function buildRateLimitStore() {
@@ -48,10 +66,10 @@ app.use(helmet({
     directives: {
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
       imgSrc: ["'self'", "data:", "https:"],
-      connectSrc: ["'self'"],
-      fontSrc: ["'self'"],
+      connectSrc: ["'self'", "https://*.supabase.co", "wss://*.supabase.co"],
+      fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
       objectSrc: ["'none'"],
       frameSrc: ["'none'"],
     },
@@ -193,7 +211,7 @@ app.use("/api", async (req, res, next) => {
   const authHeader = (req.headers["authorization"] as string | undefined) ?? "";
   if (authHeader.startsWith("Bearer ")) {
     const token = authHeader.slice("Bearer ".length).trim();
-    if (hasSupabaseConfig()) {
+    if (hasSupabaseConfig() && token) {
       try {
         const { data, error } = await getSupabaseClient().auth.getUser(token);
         if (!error && data.user?.id) {
@@ -205,18 +223,10 @@ app.use("/api", async (req, res, next) => {
       } catch (err) {
         req.log?.warn?.({ err }, "Supabase JWT validation failed");
       }
-      if (process.env.NODE_ENV === "production") {
-        res.status(401).json({ error: "Invalid session", code: "invalid_session" });
-        return;
-      }
     }
 
-    const payload = decodeJwtPayload(token);
-    const sub = typeof payload?.sub === "string" ? payload.sub : "";
-    req.authUserId = sub || LOCAL_DEV_USER_ID;
-    req.authUserEmail = typeof payload?.email === "string" ? payload.email : undefined;
-    req.authProvider = sub ? "supabase" : "local-dev";
-    return next();
+    res.status(401).json({ error: "Invalid session", code: "invalid_session" });
+    return;
   }
 
   // 3. No secret configured in dev → allow through with a warning
@@ -234,18 +244,29 @@ app.use("/api/anthropic/conversations/:id/messages", messagesRateLimitMiddleware
 
 app.use("/api", router);
 
-// ── Serve frontend static files in production ─────────────────────────────────
-if (process.env.NODE_ENV === "production") {
-  const __dirname = path.dirname(fileURLToPath(import.meta.url));
-  const frontendDist = path.resolve(__dirname, "../../frontend/dist/public");
+// ── Serve frontend static files when a built SPA is present ───────────────────
+// Render/monorepo: build frontend into frontend/dist/public, then start backend.
+const frontendDist = resolveFrontendDist();
+const shouldServeFrontend =
+  Boolean(frontendDist)
+  && (process.env.NODE_ENV === "production" || process.env.SERVE_FRONTEND === "true");
 
-  app.use(express.static(frontendDist, { index: "index.html" }));
+if (shouldServeFrontend && frontendDist) {
+  logger.info({ frontendDist }, "Serving frontend SPA from disk");
+  app.use(express.static(frontendDist, { index: "index.html", fallthrough: true }));
 
-  // SPA fallback — serve index.html for all non-API routes
-  app.get("*", (req, res, next) => {
-    if (req.path.startsWith("/api")) return next();
-    res.sendFile(path.join(frontendDist, "index.html"));
+  app.get(/^(?!\/api(?:\/|$)).*/, (req, res, next) => {
+    if (req.method !== "GET" && req.method !== "HEAD") return next();
+    res.sendFile(path.join(frontendDist, "index.html"), (err) => {
+      if (err) next(err);
+    });
   });
+} else if (process.env.NODE_ENV === "production") {
+  logger.warn(
+    "Production mode but frontend/dist/public/index.html was not found. "
+    + "Build the frontend (npm run build --prefix frontend) or set FRONTEND_DIST. "
+    + "Until then, GET / returns Express 404 Cannot GET /.",
+  );
 }
 
 app.use((err: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {

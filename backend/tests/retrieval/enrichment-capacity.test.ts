@@ -25,8 +25,7 @@ test("enrichment capacity >= maxSourcesToEnrich for all modes", () => {
 test("extractionTimeoutMs is properly set for all modes", () => {
   assert.equal(createLatencyBudget("fast_research").extractionTimeoutMs, 6000);
   assert.equal(createLatencyBudget("deep_research").extractionTimeoutMs, 8000);
-  assert.equal(createLatencyBudget("deep_research").extractionTimeoutMs, 10000);
-  assert.equal(createLatencyBudget("council").extractionTimeoutMs, 12000);
+  assert.equal(createLatencyBudget("council").extractionTimeoutMs, 10_000);
 });
 
 test("enrichment budget is reconciled between research-mode.ts and latency-budget.ts", () => {

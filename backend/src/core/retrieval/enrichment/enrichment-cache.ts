@@ -2,7 +2,7 @@ import type { CacheManager } from "../../../services/cache-manager.js";
 import type { CacheTTLPolicy, EnrichedSource } from "./types.js";
 import { emitEnrichmentEvent } from "./telemetry.js";
 import { canonicalizeUrl, sha256Hex } from "../../retrieval-cache/retrieval-cache-key.js";
-import { freshnessForUrl as sharedFreshnessForUrl } from "../../retrieval-cache/retrieval-cache-policy.js";
+import { freshnessForExtractionUrl as sharedFreshnessForUrl } from "../../retrieval-cache/retrieval-cache-policy.js";
 import { SNIPPET_FALLBACK_TTL_MS } from "../../retrieval-cache/url-extraction-cache.js";
 
 export function enrichmentCachePolicy(
@@ -35,18 +35,12 @@ export function cacheEnrichedSource(cache: CacheManager, source: EnrichedSource,
 
 function normalizeCachedSource(source: EnrichedSource): EnrichedSource {
   if (source.extractionMethod !== "snippet_fallback") return source;
+  // Mark limited only — do not wipe weak citation eligibility computed at enrich time.
   return {
     ...source,
-    citationEligible: false,
-    citationStrength: "ineligible",
     limitedSource: true,
     enrichmentCard: source.enrichmentCard
-      ? {
-          ...source.enrichmentCard,
-          citationEligible: false,
-          citationStrength: "ineligible",
-          limitedSource: true,
-        }
+      ? { ...source.enrichmentCard, limitedSource: true }
       : source.enrichmentCard,
   };
 }

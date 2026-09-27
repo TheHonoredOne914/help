@@ -4,7 +4,7 @@ normalizeApiKeys();
 
 import app from "./app.js";
 import { logger } from "./lib/logger.js";
-import { getSupabaseClient, hasSupabaseConfig, updateMessage } from "./db.js";
+import { getMessagesByConversationId, getSupabaseClient, hasSupabaseConfig, isUsingLocalDb, listConversations, updateMessage } from "./db.js";
 import { SupabaseCacheStore } from "./lib/supabase-cache.js";
 import type { ServerResponse } from "node:http";
 
@@ -31,40 +31,110 @@ async function verifyDatabaseConnection(): Promise<void> {
 
   if (error) {
     logger.error({ error }, 'Database connectivity check FAILED');
-    throw new Error(`Cannot connect to Supabase: ${error.message}`);
+    const hint =
+      error.code === 'PGRST205' || /archives/i.test(error.message)
+        ? ' Run backend/scripts/setup-supabase-all.sql (docs/supabase/ARCHIVE_PERSISTENCE.md).'
+        : /fetch failed|ENOTFOUND|paused|inactive/i.test(error.message)
+          ? ' Restore the Supabase project if it is paused, then restart.'
+          : '';
+    throw new Error(`Cannot connect to Supabase: ${error.message}.${hint}`);
   }
   logger.info('Database connectivity check passed');
 }
 
 // ── Recover orphaned/stale running runs on startup ───────────────────────────
+const INTERRUPTED_WAITING_COPY = "Research interrupted before streamed output arrived.";
+const STALE_RUN_MS = 5 * 60 * 1000;
+
+async function recoverLocalWaitingPlaceholders(): Promise<number> {
+  if (!isUsingLocalDb()) return 0;
+  const now = Date.now();
+  let recovered = 0;
+  const conversations = await listConversations();
+  for (const conversation of conversations) {
+    const messages = await getMessagesByConversationId(conversation.id);
+    for (const message of messages) {
+      if (message.role !== "assistant") continue;
+      const content = message.content ?? "";
+      const waiting = content.includes("Waiting for streamed output");
+      const running = message.run_status === "running";
+      const unset = message.run_status == null || message.run_status === "";
+      if (waiting && (running || unset)) {
+        await updateMessage(message.id, { runStatus: "interrupted", content: INTERRUPTED_WAITING_COPY });
+        recovered += 1;
+        continue;
+      }
+      if (!running || waiting) continue;
+      const heartbeat = message.run_last_heartbeat_at ? new Date(message.run_last_heartbeat_at).getTime() : 0;
+      if (heartbeat && now - heartbeat <= STALE_RUN_MS) continue;
+      await updateMessage(message.id, { runStatus: "interrupted" });
+      recovered += 1;
+    }
+  }
+  return recovered;
+}
+
 async function recoverOrphanedRuns(): Promise<void> {
-  if (!hasSupabaseConfig()) return;
+  if (!hasSupabaseConfig()) {
+    try {
+      const recovered = await recoverLocalWaitingPlaceholders();
+      if (recovered > 0) logger.info({ recovered }, "Recovered stale running runs on startup");
+    } catch (err) {
+      logger.warn({ err }, "Stale run recovery failed — non-fatal");
+    }
+    return;
+  }
 
   try {
     const supabase = getSupabaseClient();
     const { data, error } = await supabase
       .from('messages')
-      .select('id, run_status, run_last_heartbeat_at')
+      .select('id, run_status, run_last_heartbeat_at, content')
       .eq('run_status', 'running');
-
-    if (error || !data?.length) return;
 
     const now = Date.now();
     const STALE_AFTER_MS = 5 * 60 * 1000; // 5 minutes
+    const recoveredIds = new Set<number>();
 
-    for (const msg of data) {
-      const heartbeat = msg.run_last_heartbeat_at
-        ? new Date(msg.run_last_heartbeat_at).getTime()
-        : 0;
-      const isStale = !heartbeat || now - heartbeat > STALE_AFTER_MS;
-      if (isStale) {
+    if (!error && data?.length) {
+      for (const msg of data) {
+        const content = typeof msg.content === "string" ? msg.content : "";
+        const isWaitingPlaceholder = content.includes("Waiting for streamed output");
+        const heartbeat = msg.run_last_heartbeat_at
+          ? new Date(msg.run_last_heartbeat_at).getTime()
+          : 0;
+        const isStale = !heartbeat || now - heartbeat > STALE_AFTER_MS;
+        if (!isWaitingPlaceholder && !isStale) continue;
         await updateMessage(msg.id, {
           runStatus: 'interrupted',
+          ...(isWaitingPlaceholder
+            ? { content: "Research interrupted before streamed output arrived." }
+            : {}),
         });
+        recoveredIds.add(msg.id);
       }
     }
 
-    logger.info({ recovered: data.length }, 'Recovered stale running runs on startup');
+    const { data: waitingRows, error: waitingError } = await supabase
+      .from('messages')
+      .select('id, run_status, content')
+      .ilike('content', '%Waiting for streamed output%')
+      .is('run_status', null);
+
+    if (!waitingError && waitingRows?.length) {
+      for (const msg of waitingRows) {
+        if (recoveredIds.has(msg.id)) continue;
+        await updateMessage(msg.id, {
+          runStatus: 'interrupted',
+          content: "Research interrupted before streamed output arrived.",
+        });
+        recoveredIds.add(msg.id);
+      }
+    }
+
+    if (recoveredIds.size > 0) {
+      logger.info({ recovered: recoveredIds.size }, 'Recovered stale running runs on startup');
+    }
   } catch (err) {
     logger.warn({ err }, 'Stale run recovery failed — non-fatal');
   }

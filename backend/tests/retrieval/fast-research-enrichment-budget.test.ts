@@ -1,10 +1,11 @@
 import { describe, it } from "node:test";
 import { expect } from "../helpers/expect.js";
+import { RESEARCH_LIMITS } from "../../src/core/config/research-mode.js";
 
 describe("Fast Research Enrichment Budget", () => {
   describe("Budget timing", () => {
     it("should respect 20s enrichment budget for fast_research", async () => {
-      const budgetMs = 20_000; // 20 seconds
+      const budgetMs = 200;
       const startTime = Date.now();
 
       // Simulate enrichment that respects budget
@@ -32,15 +33,13 @@ describe("Fast Research Enrichment Budget", () => {
     });
 
     it("should complete enrichment within budget when sources are fast", async () => {
-      const budgetMs = 20_000;
+      const budgetMs = 200;
       const startTime = Date.now();
 
-      // Simulate fast enrichment (3 sources in 5 seconds)
-      const controller = new AbortController();
       const enrichedCount = await new Promise<number>((resolve) => {
         setTimeout(() => {
           resolve(3);
-        }, 5000); // Fast completion
+        }, 50);
       });
 
       const elapsed = Date.now() - startTime;
@@ -196,16 +195,9 @@ describe("Fast Research Enrichment Budget", () => {
 
   describe("Budget configuration", () => {
     it("should define correct budget for each research mode", () => {
-      const budgets = {
-        fast_research: 20_000,
-        deep_research: 60_000,
-        deep_research: 120_000,
-        council: 150_000,
-      };
-
-      expect(budgets.fast_research).toBe(20_000);
-      expect(budgets.deep_research).toBeGreaterThan(budgets.fast_research);
-      expect(budgets.deep_research).toBeGreaterThan(budgets.deep_research);
+      expect(RESEARCH_LIMITS.fast_research.enrichmentBudgetMs).toBeGreaterThan(0);
+      expect(RESEARCH_LIMITS.deep_research.enrichmentBudgetMs).toBeGreaterThan(RESEARCH_LIMITS.fast_research.enrichmentBudgetMs);
+      expect(RESEARCH_LIMITS.council.enrichmentBudgetMs).toBeGreaterThanOrEqual(RESEARCH_LIMITS.deep_research.enrichmentBudgetMs);
     });
   });
 });

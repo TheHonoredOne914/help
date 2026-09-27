@@ -92,9 +92,9 @@ export const ChatInputBox = React.forwardRef<ChatInputBoxHandle, ChatInputBoxPro
       className={cn(
         // Transparent, borderless input with auto-resize.
         "block w-full min-h-[56px] max-h-[152px] resize-none border-0 bg-transparent sm:min-h-[64px] sm:max-h-[160px]",
-        "py-2.5 pl-3 pr-3 text-sm leading-relaxed text-foreground shadow-none",
-        "placeholder:text-muted-foreground/70",
-        "focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus:ring-0",
+        "py-2.5 pl-3 pr-3 text-sm leading-relaxed text-[var(--ink)] shadow-none",
+        "placeholder:text-[var(--slate)]/70",
+        "focus:outline-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brass)]/40",
         "sm:pr-[9rem]",
         className,
       )}

@@ -12,7 +12,9 @@ test("generic Indian parliamentary prompt does not produce junk duplicated-year 
   const queries = plan.queries.map((item) => item.query);
   const joined = queries.join("\n");
 
-  assert.doesNotMatch(joined, /\b(20\d{2})\s+\1\b/);
+  for (const query of queries) {
+    assert.doesNotMatch(query, /\b(20\d{2})\s+\1\b/);
+  }
   assert.doesNotMatch(joined, /India parliamentary issue The Hindu Indian Express/i);
   assert.doesNotMatch(joined, /^India parliament official source(?:\s+20\d{2})?$/im);
   assert.doesNotMatch(joined, /^India Supreme Court judgment(?:\s+20\d{2})?$/im);

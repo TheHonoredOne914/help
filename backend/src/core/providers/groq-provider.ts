@@ -1,5 +1,6 @@
 import type { ModelProvider, ProviderRequest, ProviderResponse } from "./provider-types.js";
 import { safeProviderError } from "./provider-errors.js";
+import { multiKeyFetch } from "../../lib/multi-key-fetch.js";
 
 export class GroqProvider implements ModelProvider {
   readonly name = "groq" as const;
@@ -7,7 +8,7 @@ export class GroqProvider implements ModelProvider {
 
   async complete(request: ProviderRequest): Promise<ProviderResponse> {
     if (!this.options.apiKey) throw safeProviderError(this.name, new Error("Groq provider unavailable: missing API key"));
-    const fetchFn = this.options.fetchFn ?? fetch;
+    const fetchFn = this.options.fetchFn ?? multiKeyFetch;
     const started = Date.now();
     const response = await fetchFn("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",

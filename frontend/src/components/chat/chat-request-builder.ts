@@ -9,6 +9,7 @@ interface BuildChatRequestBodyInput {
   autoFallback?: boolean;
   userSystemPrompt?: string;
   rhetoricsOpts?: { rhetoricsType: RhetoricsType; creativity: number };
+  regenerate?: boolean;
 }
 
 export function buildChatRequestBody({
@@ -20,13 +21,19 @@ export function buildChatRequestBody({
   autoFallback = false,
   userSystemPrompt,
   rhetoricsOpts,
+  regenerate = false,
 }: BuildChatRequestBodyInput) {
+  const regenerateField = regenerate ? { regenerate: true as const } : {};
   if (rhetoricsOpts) {
     return {
       content,
       mode: "rhetorics" as const,
       rhetoricsType: rhetoricsOpts.rhetoricsType,
       creativity: rhetoricsOpts.creativity,
+      normalModel: activeProviderModel || normalModel,
+      autoFallback,
+      systemPrompt: userSystemPrompt || undefined,
+      ...regenerateField,
     };
   }
 
@@ -39,6 +46,7 @@ export function buildChatRequestBody({
     webModels: mode === "normal" ? undefined : modelsForMode,
     autoFallback,
     systemPrompt: userSystemPrompt || undefined,
+    ...regenerateField,
   };
 }
 

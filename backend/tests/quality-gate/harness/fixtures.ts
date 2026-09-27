@@ -3,8 +3,11 @@ import { buildClaimLedger, type ClaimLedger } from "../../../src/core/evidence/c
 import type { ClaimGraph } from "../../../src/core/evidence/claim-graph.js";
 import { buildEvidenceRegistryFromSources, type EvidenceRegistryCore, type RawEvidenceSourceInput, type SourceClass } from "../../../src/core/evidence/evidence-registry.js";
 import type { ModelRoleOutput, SourceUsageMapItem, SourceUsageValidationReport } from "../../../src/core/evidence/source-usage-map.js";
-import type { ResearchMode } from "../../../src/core/config/research-mode.js";
-import type { QualityGateInput } from "../../../src/core/verification/thesis-quality-gate.js";
+import { RESEARCH_LIMITS, type ResearchMode } from "../../../src/core/config/research-mode.js";
+import { MODE_THRESHOLDS } from "../../../src/core/quality-gate/mode-thresholds.js";
+import { runQualityGate } from "../../../src/core/quality-gate/run-quality-gate.js";
+import type { QualityGateInput, QualityGateReport } from "../../../src/core/quality-gate/types.js";
+import type { AgendaContract } from "../../../src/core/agenda/agenda-contract.js";
 
 const SOURCE_CLASSES: SourceClass[] = [
   "official_government",
@@ -83,7 +86,14 @@ export function createQualityGateHarnessFixture(options: {
 }
 
 export function buildPassingAnswer(registry: EvidenceRegistryCore, mode: ResearchMode = "deep_research"): string {
-  const citations = registry.sources.slice(0, mode === "fast_research" ? 8 : 30).map((source) => registry.getCitationMarkdown(source.id)).join(" ");
+  const citationCount = Math.min(registry.sources.length, RESEARCH_LIMITS[mode].minFinalUniqueCitedSources);
+  const citations = registry.sources.slice(0, citationCount).map((source) => registry.getCitationMarkdown(source.id)).join(" ");
+  const minWords = MODE_THRESHOLDS[mode].finalAnswerMinWords;
+  const maxWords = MODE_THRESHOLDS[mode].finalAnswerMaxWords;
+  const targetWords = maxWords > 0 ? Math.min(maxWords - 150, minWords + 250) : minWords + 150;
+  const fillerParagraphs = Array.from({ length: Math.max(0, Math.ceil((targetWords - 500) / 35)) }, (_, index) =>
+    `Analytical paragraph ${index + 1} grounds Treasury Bench accountability, Opposition rights scrutiny, Election Commission safeguards, Article 19 proportionality, committee oversight, and source-backed parliamentary strategy without overclaiming beyond the registry. Treasury Bench and Opposition framing remain explicit for Indian Mock Parliament debate utility.`,
+  ).join("\n\n");
   return [
     "# Executive Thesis",
     `India's election-integrity debate requires careful parliamentary scrutiny of Election Commission safeguards, Article 19 speech limits, and Supreme Court proportionality doctrine. Treasury Bench can defend administrable safeguards while Opposition can press transparency and rights-based limits. ${citations}`,
@@ -93,6 +103,7 @@ export function buildPassingAnswer(registry: EvidenceRegistryCore, mode: Researc
     "D1 agenda lock, D2 analytical dimensions, D3 stakeholders, D4 contradictions, D5 narrative frames, D6 evidence verification, D7 debate utility, D8 policy, D9 predictions, D10 tradeoffs, and D11 strategy are integrated.",
     "# Indian Mock Parliament Debate Utility Arsenal",
     buildD7Section(mode),
+    fillerParagraphs,
     "# Final Strategic Synthesis",
     buildD11Section(mode),
   ].join("\n\n");
@@ -191,15 +202,17 @@ function roleOutput(roleName: string, count: number): ModelRoleOutput {
 }
 
 function usage(sourceId: number): SourceUsageMapItem {
+  const sourceClass = SOURCE_CLASSES[(sourceId - 1) % SOURCE_CLASSES.length];
+  const legalSource = sourceClass === "court_primary" || sourceClass === "legal_commentary";
   return {
     sourceId,
     title: `Brick 21 Source ${sourceId}`,
     bucketIds: [BUCKETS[(sourceId - 1) % BUCKETS.length] as any],
-    sourceClass: SOURCE_CLASSES[(sourceId - 1) % SOURCE_CLASSES.length],
-    usageType: sourceId % 5 === 0 ? "legal_holding_extracted" : sourceId % 3 === 0 ? "number_extracted" : "supports_claim",
+    sourceClass,
+    usageType: legalSource && sourceId % 5 === 0 ? "legal_holding_extracted" : sourceId % 3 === 0 ? "number_extracted" : "fact_extracted",
     extractedClaim: `Evidence item ${sourceId} supports Indian election integrity safeguard ${sourceId}`,
     extractedNumber: sourceId % 3 === 0 ? `safeguard ${sourceId}` : undefined,
-    legalHolding: sourceId % 5 === 0 ? `Article 19 proportionality applies to election-integrity restrictions in source ${sourceId}.` : undefined,
+    legalHolding: legalSource && sourceId % 5 === 0 ? `Article 19 proportionality applies to election-integrity restrictions in source ${sourceId}.` : undefined,
     supportedSection: `D${(sourceId % 11) + 1}`,
     confidence: "high",
     evidenceSpan: { sourceId, text: `Evidence item ${sourceId} supports Indian election integrity safeguard ${sourceId}`, extractionQuality: "full", sharedTokens: ["election", "integrity"], verifiedBy: "key_fact" },
@@ -236,6 +249,20 @@ function buildClaimGraphFixture(count: number): ClaimGraph {
     unsupportedClaims: [],
     summary: { claimCount: claims.length, counterclaimCount: 1, contradictionCount: 1, strongClaimCount: claims.length, carefulLanguageClaimCount: 1, approvedSourceCount: count },
   };
+}
+
+export function runHarnessQualityGate(
+  finalText: string,
+  contract: AgendaContract,
+  registry: EvidenceRegistryCore,
+  input: QualityGateInput,
+): QualityGateReport {
+  return runQualityGate({
+    finalText,
+    contract,
+    registry,
+    input: { ...input, evidenceRegistry: input.evidenceRegistry ?? registry },
+  });
 }
 
 function buildDivisionOutputs(registry: EvidenceRegistryCore): Map<string, string> {

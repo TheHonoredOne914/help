@@ -18,6 +18,8 @@ function setup() {
 test("live mode requires role-generated SourceUsageMap and rejects fake role output", async () => {
   const { agendaContract, evidenceRegistry, cards } = setup();
   const providerRouter = {
+    hasProvider: () => true,
+    getRegisteredProviderNames: () => ["groq"],
     complete: async () => ({
       provider: "groq",
       model: "test",
@@ -44,6 +46,8 @@ test("model role batches merge to real 30-source usage", async () => {
   const { agendaContract, evidenceRegistry, cards } = setup();
   const claimBySourceId = new Map(cards.map((card) => [card.sourceId, card.keyFacts[0] ?? card.debateUse]));
   const providerRouter = {
+    hasProvider: () => true,
+    getRegisteredProviderNames: () => ["groq"],
     complete: async (_provider: string, request: any) => {
       const ids = [...request.messages.at(-1).content.matchAll(/SourceId:\s*(\d+)/g)].map((match) => Number(match[1])).slice(0, 10);
       return {

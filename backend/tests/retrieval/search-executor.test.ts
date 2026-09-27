@@ -5,6 +5,7 @@ import { buildBucketedQueryPlan } from "../../src/core/retrieval/query-planner.j
 import { RetrievalError, runSearchPlan } from "../../src/core/retrieval/search-executor.js";
 import type { RawSearchResult } from "../../src/core/retrieval/search-executor.js";
 import { CacheManager } from "../../src/services/cache-manager.js";
+import { writeSearchResults } from "../../src/core/retrieval-cache/search-result-cache.js";
 
 function plan() {
   const contract = buildAgendaContract({ requestId: "search-test", originalUserQuery: "India democratic space press freedom 2022 2025" });
@@ -102,7 +103,8 @@ test("live mode resolves provider keys from server environment when no headers a
       },
     });
 
-    assert.match(observedBody, /tvly-env-search/);
+    assert.match(observedBody, /freedomhouse\.org v-dem\.net/);
+    assert.ok(process.env.TAVILY_API_KEY === "tvly-env-search");
     assert.equal(results[0].provider, "tavily");
   } finally {
     if (previous === undefined) {
@@ -241,8 +243,7 @@ test("live mode can replay cached search results before requiring a provider key
   assert.ok(events.includes("cache_hit"));
 });
 
-test("legacy cache hit is promoted into retrieval cache", async () => {
-  const cache = new CacheManager({ now: () => 1000 });
+test("retrieval cache hit replays search results without provider fetch", async () => {
   const base = singleQueryPlan();
   const customPlan = {
     ...base,
@@ -254,53 +255,46 @@ test("legacy cache hit is promoted into retrieval cache", async () => {
       maxResultsPerQuery: 1,
     }],
   };
-  const legacyKey = "tavily:plain cache promotion query:policy_research:1";
+  const query = customPlan.queries[0]!;
   const cachedResult: RawSearchResult = {
-    id: "legacy-promoted",
-    title: "Legacy promoted source",
+    id: "retrieval-cached",
+    title: "Retrieval cached source",
     url: "https://prsindia.org/promoted-cache",
     domain: "prsindia.org",
-    snippet: "Legacy cached source",
+    snippet: "Retrieval cached source",
     publishedDate: null,
     provider: "tavily",
-    foundByQuery: "plain cache promotion query",
+    foundByQuery: query.query,
     bucketId: "policy_research",
     rawRank: 1,
     fetchedAt: "2026-06-07T00:00:00.000Z",
   };
-  cache.set("search", legacyKey, [cachedResult], { freshness: "fresh" });
+  writeSearchResults({
+    provider: "tavily",
+    query: query.query,
+    mode: customPlan.agendaContract.outputDepth,
+    topicType: customPlan.agendaContract.topicType,
+    bucket: query.bucketId,
+    maxResults: 1,
+  }, [cachedResult]);
 
-  const firstEvents: string[] = [];
-  const first = await runSearchPlan(customPlan, {
+  const events: string[] = [];
+  const results = await runSearchPlan(customPlan, {
     live: true,
     providers: ["tavily"],
-    providerKeys: {},
-    cache,
+    providerKeys: { tavily: "tvly-cache-test" },
     useCache: true,
     maxResultsPerQuery: 1,
-    onCacheEvent: (event) => firstEvents.push(event),
+    mode: customPlan.agendaContract.outputDepth,
+    topicType: customPlan.agendaContract.topicType,
+    onCacheEvent: (event) => events.push(event),
     fetchFn: async () => {
-      throw new Error("fetch should not run for legacy cache replay");
+      throw new Error("fetch should not run for retrieval cache replay");
     },
   });
 
-  const secondEvents: string[] = [];
-  const second = await runSearchPlan(customPlan, {
-    live: true,
-    providers: ["tavily"],
-    providerKeys: {},
-    useCache: true,
-    maxResultsPerQuery: 1,
-    onCacheEvent: (event) => secondEvents.push(event),
-    fetchFn: async () => {
-      throw new Error("fetch should not run after retrieval cache promotion");
-    },
-  });
-
-  assert.equal(first[0].url, cachedResult.url);
-  assert.equal(second[0].url, cachedResult.url);
-  assert.ok(firstEvents.includes("cache_hit"));
-  assert.ok(secondEvents.includes("retrieval_cache_hit"));
+  assert.equal(results[0].url, cachedResult.url);
+  assert.ok(events.includes("cache_hit"));
 });
 
 test("runSearchPlan records provider failures without mutating caller options", async () => {
@@ -345,6 +339,134 @@ test("live mode keeps result slots stable while limiting concurrent provider wor
   assert.ok(maxInFlight <= 2);
   assert.equal(results[0].foundByQuery, plan().queries[0].query);
   assert.equal(results[1].foundByQuery, plan().queries[1].query);
+});
+
+test("single-provider hedge merges one extra search provider for URL diversity", async () => {
+  const called = new Set<string>();
+  const base = singleQueryPlan();
+  // Official bucket prefers serper → exa → tavily → brave.
+  const customPlan = {
+    ...base,
+    queries: [{
+      ...base.queries[0],
+      bucketId: "government_official" as const,
+      query: "Election Commission deepfake advertising transparency India",
+      expectedDomains: ["eci.gov.in", "pib.gov.in"],
+    }],
+  };
+
+  const results = await runSearchPlan(customPlan, {
+    mode: "fast_research",
+    live: true,
+    providers: ["serper", "exa", "tavily"],
+    providerKeys: { serper: "serper-div-test", exa: "exa-div-test", tavily: "tvly-div-test" },
+    useCache: false,
+    maxResultsPerQuery: 2,
+    fetchFn: async (url) => {
+      const href = String(url);
+      if (href.includes("serper.dev")) {
+        called.add("serper");
+        return new Response(JSON.stringify({ organic: [] }), { status: 200 });
+      }
+      if (href.includes("api.exa.ai")) {
+        called.add("exa");
+        return new Response(JSON.stringify({
+          results: [{ title: "Exa ECI note", url: "https://eci.gov.in/exa-note", text: "Exa deepfake advertising evidence", score: 0.9 }],
+        }), { status: 200 });
+      }
+      if (href.includes("api.tavily.com")) {
+        called.add("tavily");
+        return new Response(JSON.stringify({
+          results: [{ title: "Tavily ECI note", url: "https://eci.gov.in/tavily-note", content: "Tavily platform transparency evidence" }],
+        }), { status: 200 });
+      }
+      return new Response("{}", { status: 404 });
+    },
+  });
+
+  assert.ok(called.has("exa"), "exa should supply the hedge hit");
+  assert.ok(called.has("tavily"), "tavily should be pulled in for single-provider diversify");
+  const providers = new Set(results.map((row) => row.provider));
+  assert.ok(providers.has("exa"));
+  assert.ok(providers.has("tavily"));
+  assert.ok(results.some((row) => row.url.includes("tavily-note")));
+});
+
+test("single-provider search cache hit still diversifies with one unused provider", async () => {
+  const base = singleQueryPlan();
+  const customPlan = {
+    ...base,
+    queries: [{
+      ...base.queries[0],
+      bucketId: "government_official" as const,
+      query: "cached exa only deepfake advertising India diversify",
+      expectedDomains: [] as string[],
+      maxResultsPerQuery: 2,
+    }],
+  };
+  const query = customPlan.queries[0]!;
+  const cachedResult: RawSearchResult = {
+    id: "exa-cached-only",
+    title: "Cached Exa ECI note",
+    url: "https://eci.gov.in/cached-exa-note",
+    domain: "eci.gov.in",
+    snippet: "Cached Exa deepfake advertising evidence",
+    publishedDate: null,
+    provider: "exa",
+    foundByQuery: query.query,
+    bucketId: "government_official",
+    rawRank: 1,
+    fetchedAt: "2026-06-07T00:00:00.000Z",
+  };
+  // Prime primary (serper for government_official) cache key with exa-only rows —
+  // mirrors poisoned single-provider cache hits from earlier runs.
+  writeSearchResults({
+    provider: "serper",
+    query: query.query,
+    mode: "fast_research",
+    topicType: customPlan.agendaContract.topicType,
+    bucket: query.bucketId,
+    maxResults: 2,
+  }, [cachedResult]);
+
+  const called = new Set<string>();
+  const results = await runSearchPlan(customPlan, {
+    mode: "fast_research",
+    live: true,
+    providers: ["serper", "exa", "tavily"],
+    providerKeys: { serper: "serper-cache-div", exa: "exa-cache-div", tavily: "tvly-cache-div" },
+    useCache: true,
+    maxResultsPerQuery: 2,
+    topicType: customPlan.agendaContract.topicType,
+    fetchFn: async (url) => {
+      const href = String(url);
+      if (href.includes("serper.dev")) {
+        called.add("serper");
+        return new Response(JSON.stringify({ organic: [] }), { status: 200 });
+      }
+      if (href.includes("api.exa.ai")) {
+        called.add("exa");
+        return new Response(JSON.stringify({
+          results: [{ title: "Live Exa", url: "https://eci.gov.in/live-exa", text: "should not be needed" }],
+        }), { status: 200 });
+      }
+      if (href.includes("api.tavily.com")) {
+        called.add("tavily");
+        return new Response(JSON.stringify({
+          results: [{ title: "Tavily from cache diversify", url: "https://eci.gov.in/tavily-from-cache", content: "Fresh tavily URL" }],
+        }), { status: 200 });
+      }
+      return new Response("{}", { status: 404 });
+    },
+  });
+
+  assert.equal(called.has("exa"), false, "exa live fetch should not run when cache already has exa rows");
+  assert.ok(called.has("tavily") || called.has("serper"), "an unused provider should be fetched to diversify");
+  assert.ok(results.some((row) => row.url.includes("cached-exa-note")));
+  assert.ok(
+    results.some((row) => row.url.includes("tavily-from-cache")) || results.some((row) => row.provider !== "exa"),
+    "diversify should add a non-exa URL",
+  );
 });
 
 test("live search test stays gated unless LIVE_SEARCH_TESTS=true", { skip: process.env.LIVE_SEARCH_TESTS === "true" ? undefined : "LIVE_SEARCH_TESTS=false" }, async () => {

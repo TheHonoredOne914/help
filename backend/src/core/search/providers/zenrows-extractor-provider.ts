@@ -1,3 +1,4 @@
+import { multiKeyFetch } from "../../../lib/multi-key-fetch.js";
 import {
   fetchWithTimeout,
   redactKnownSecretValues,
@@ -79,7 +80,7 @@ export const zenrowsExtractorProvider: ExtractorProvider = {
     const safeUrl = await safeTargetUrl(url, options);
     const requestUrl = buildRequestUrl(safeUrl.href, env, key);
     const response = await fetchWithTimeout(
-      options.fetchFn ?? fetch,
+      options.fetchFn ?? multiKeyFetch,
       requestUrl,
       { method: "GET", signal: options.abortSignal },
       options.timeoutMs ?? env.timeoutMs,

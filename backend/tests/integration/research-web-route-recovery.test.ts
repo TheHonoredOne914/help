@@ -28,7 +28,7 @@ function sources(count: number, withText = true) {
   }));
 }
 
-test("web_search-equivalent fast policy completes with source gaps instead of requiring 30-source proof", async () => {
+test("web_search-equivalent fast policy fails closed below the 40-source floor", async () => {
   const events: string[] = [];
   const previous = process.env.SOURCE_USAGE_ROLES_USE_MODEL;
   process.env.SOURCE_USAGE_ROLES_USE_MODEL = "true";
@@ -48,20 +48,23 @@ test("web_search-equivalent fast policy completes with source gaps instead of re
       emit: (event) => events.push(event.type),
     });
     assert.ok(result.sourceGapReport);
-    assert.ok(events.includes("source_gap_report_created"));
-    assert.match(result.finalAnswer, /source gaps/i);
+    assert.equal(result.terminalStatus, "failed");
+    assert.equal(result.usedLegacyFallback, false);
+    assert.notEqual(result.terminalStatus, "completed_with_source_gaps");
+    assert.match(result.finalAnswer, /Insufficient Sources/i);
+    assert.ok(events.includes("failed") || events.includes("pipeline_failed"));
   } finally {
     if (previous === undefined) delete process.env.SOURCE_USAGE_ROLES_USE_MODEL;
     else process.env.SOURCE_USAGE_ROLES_USE_MODEL = previous;
   }
 });
 
-test("strict phd route fails honestly when source usage cannot be proven", async () => {
+test("strict deep route fails closed when citation-eligible floor is missed", async () => {
   const previous = process.env.SOURCE_USAGE_ROLES_USE_MODEL;
   process.env.SOURCE_USAGE_ROLES_USE_MODEL = "true";
   try {
-    await assert.rejects(() => runResearchPipeline({
-      userQuery: "PhD level India parliament",
+    const result = await runResearchPipeline({
+      userQuery: "Deep level India parliament",
       mode: "deep_research",
       preloadedSources: sources(5, false),
       liveRetrieval: false,
@@ -72,7 +75,10 @@ test("strict phd route fails honestly when source usage cannot be proven", async
       providerName: "gemini",
       model: "test",
       allowSyntheticSourceUsage: false,
-    }), (error: any) => error?.code === "SOURCE_USAGE_VALIDATION_FAILED");
+    });
+    assert.equal(result.terminalStatus, "failed");
+    assert.equal(result.usedLegacyFallback, false);
+    assert.match(result.finalAnswer, /Insufficient Sources/i);
   } finally {
     if (previous === undefined) delete process.env.SOURCE_USAGE_ROLES_USE_MODEL;
     else process.env.SOURCE_USAGE_ROLES_USE_MODEL = previous;

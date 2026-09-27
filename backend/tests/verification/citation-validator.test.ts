@@ -30,6 +30,21 @@ test("bare Source N tags can be linked only through real registry sources", () =
   assert.match(linked, /\[1\]/);
 });
 
+test("parenthetical Source N and empty cite placeholders are normalized", () => {
+  const contract = buildAgendaContract({ originalUserQuery: "India democratic space 2022 2025 Freedom House V-Dem Supreme Court ECI" });
+  const registry = buildEvidenceRegistryFromSources(fixtureSources as any, contract);
+
+  const linked = linkBareSourceCitations(
+    "NFHS data (Source 1) supports the claim.\n- (Obesity and NCD data)\n- Keep this bullet",
+    registry,
+  );
+
+  assert.match(linked, /\[Source 1\]\(https?:\/\/[^)]+\)/);
+  assert.doesNotMatch(linked, /\(Source 1\)/);
+  assert.doesNotMatch(linked, /-\s*\(Obesity and NCD data\)/);
+  assert.match(linked, /Keep this bullet/);
+});
+
 test("model source brackets are normalized to registry markdown links", () => {
   const contract = buildAgendaContract({ originalUserQuery: "India democratic space 2022 2025 Freedom House V-Dem Supreme Court ECI" });
   const registry = buildEvidenceRegistryFromSources(fixtureSources as any, contract);

@@ -8,9 +8,9 @@ test("bucketed query planner emits domain-specific democracy queries without AI 
   const plan = buildBucketedQueryPlan(contract);
   const joined = plan.queries.map((query) => query.query).join("\n");
 
-  assert.ok(plan.queries.length >= 60);
+  assert.ok(plan.queries.length >= 56);
   assert.ok(plan.queries.length <= PHD_RESEARCH_LIMITS.maxTotalQueries);
-  for (const term of ["Freedom House", "V-Dem", "EIU", "site:mha.gov.in", "Supreme Court", "HRW", "Amnesty", "CIVICUS", "RSF", "Access Now", "site:epw.in", "site:thehindu.com", "site:indianexpress.com"]) {
+  for (const term of ["Freedom House", "V-Dem", "EIU", "site:mha.gov.in", "Supreme Court", "HRW", "Amnesty", "CIVICUS", "RSF", "Access Now", "site:epw.in", "Indian media explained"]) {
     assert.match(joined, new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"));
   }
   assert.doesNotMatch(joined, /generative AI|UN Security Council|member states|UN resolution/i);

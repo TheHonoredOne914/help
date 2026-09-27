@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fixtureSources from "../fixtures/india-democracy-sources.json" with { type: "json" };
+import { RESEARCH_LIMITS } from "../../src/core/config/research-mode.js";
 import { runResearchPipeline } from "../../src/core/pipeline/research-pipeline.js";
 
 test("core pipeline produces final answer without legacy fallback by default", async () => {
@@ -30,7 +31,7 @@ test("legacy fallback is used only when core generation fails and still runs val
     mode: "deep_research",
     preloadedSources: fixtureSources as any,
     forceCoreGenerationFailure: true,
-    legacyFallback: async ({ evidenceRegistry }) => `# Executive Thesis\nFallback answer with Indian Parliament framing, Treasury Bench, Opposition, POI, rebuttal, motion, amendment, central contradiction and strategic synthesis. ${Array.from({ length: 30 }, (_, index) => evidenceRegistry.getCitationMarkdown(index + 1)).join(" ")}`,
+    legacyFallback: async ({ evidenceRegistry }) => `# Executive Thesis\nFallback answer with Indian Parliament framing, Treasury Bench, Opposition, POI, rebuttal, motion, amendment, central contradiction and strategic synthesis. ${Array.from({ length: RESEARCH_LIMITS.deep_research.minFinalUniqueCitedSources }, (_, index) => evidenceRegistry.getCitationMarkdown(index + 1)).join(" ")}`,
   });
 
   assert.equal(result.usedLegacyFallback, true);

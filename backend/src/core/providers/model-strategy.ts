@@ -1,27 +1,8 @@
 import type { ResearchMode } from "../config/research-mode.js";
 import type { ProviderHealthCandidate, ProviderResearchStatus } from "./provider-health.js";
+import { FAST_FALLBACK_MODELS, OPENCODE_ZEN_STRONG_MODEL, STRONG_FALLBACK_MODELS } from "./catalog/index.js";
 import { parseProviderModelId } from "./provider-model-id.js";
 import type { ProviderName } from "./provider-types.js";
-
-const STRONG_MODELS: ProviderHealthCandidate[] = [
-  { providerName: "groq", model: "llama-3.3-70b-versatile" },
-  { providerName: "openrouter", model: "qwen/qwen3-32b" },
-  { providerName: "nvidia", model: "nvidia/llama-3.3-nemotron-super-49b-v1" },
-  { providerName: "gemini", model: "gemini-2.5-pro" },
-  { providerName: "openai", model: "gpt-4.1" },
-  { providerName: "cerebras", model: "llama3.3-70b" },
-  { providerName: "github", model: "openai/gpt-4.1" },
-];
-
-const FAST_MODELS: ProviderHealthCandidate[] = [
-  { providerName: "groq", model: "llama-3.3-70b-versatile" },
-  { providerName: "openrouter", model: "qwen/qwen3-32b" },
-  { providerName: "nvidia", model: "nvidia/llama-3.3-nemotron-super-49b-v1" },
-  { providerName: "gemini", model: "gemini-2.5-flash" },
-  { providerName: "cerebras", model: "llama3.1-8b" },
-  { providerName: "github", model: "openai/gpt-4.1-mini" },
-  { providerName: "openai", model: "gpt-4.1-mini" },
-];
 
 const UNSTABLE_GENERATION_MODELS = /^(nvidia\/moonshotai\/kimi-k2\.6|nvidia\/nvidia\/nemotron-3-ultra-550b-a55b|openrouter\/nvidia\/nemotron-3-ultra-550b-a55b(?::free)?)$/i;
 
@@ -103,7 +84,7 @@ export const SOURCE_USAGE_RESEARCH_ROLES: ResearchRole[] = [
 ];
 
 export function fallbackModelsForMode(mode: ResearchMode): ProviderHealthCandidate[] {
-  return mode === "fast_research" ? FAST_MODELS : STRONG_MODELS;
+  return mode === "fast_research" ? FAST_FALLBACK_MODELS : STRONG_FALLBACK_MODELS;
 }
 
 export function buildResearchModelPlan(input: BuildResearchModelPlanInput): ResearchModelPlan {
@@ -112,7 +93,7 @@ export function buildResearchModelPlan(input: BuildResearchModelPlanInput): Rese
     .map((modelId) => parseExplicitModel(modelId, warnings))
     .filter((candidate): candidate is ProviderHealthCandidate & { originalModelId: string } => Boolean(candidate));
   const selectedCandidate = input.selected
-    ? { ...input.selected, originalModelId: `${input.selected.providerName}/${input.selected.model}` }
+    ? remapCerebrasCandidate({ ...input.selected, originalModelId: `${input.selected.providerName}/${input.selected.model}` }, warnings)
     : undefined;
   const explicitPool = explicitCandidates.length > 0
     ? explicitCandidates
@@ -239,15 +220,34 @@ function parseExplicitModel(modelId: string, warnings: string[]): (ProviderHealt
       warnings.push(`Unsupported generation provider prefix: ${parsed.prefix}`);
       return null;
     }
-    return { providerName, model: parsed.modelId, originalModelId: modelId };
+    return remapCerebrasCandidate({ providerName, model: parsed.modelId, originalModelId: modelId }, warnings);
   } catch (error) {
     warnings.push(error instanceof Error ? error.message : String(error));
     return null;
   }
 }
 
+function remapCerebrasCandidate(
+  candidate: ProviderHealthCandidate & { originalModelId?: string },
+  warnings?: string[],
+): ProviderHealthCandidate & { originalModelId: string } {
+  if (candidate.providerName !== "cerebras") {
+    return {
+      ...candidate,
+      originalModelId: candidate.originalModelId ?? `${candidate.providerName}/${candidate.model}`,
+    };
+  }
+  warnings?.push(`Remapped cerebras/${candidate.model} → opencode/nemotron-3-ultra-free`);
+  return {
+    ...candidate,
+    providerName: "opencode",
+    model: process.env.OPENCODE_ZEN_STRONG_MODEL?.trim() || OPENCODE_ZEN_STRONG_MODEL,
+    originalModelId: candidate.originalModelId ?? `cerebras/${candidate.model}`,
+  };
+}
+
 function toProviderName(prefix: string): ProviderName | null {
-  return prefix === "groq" || prefix === "openrouter" || prefix === "gemini" || prefix === "nvidia" || prefix === "github" || prefix === "cerebras" || prefix === "openai"
+  return prefix === "groq" || prefix === "openrouter" || prefix === "gemini" || prefix === "nvidia" || prefix === "github" || prefix === "cerebras" || prefix === "openai" || prefix === "opencode"
     ? prefix as ProviderName
     : null;
 }
@@ -296,7 +296,14 @@ export function selectHealthyModelForMode(args: {
   ];
   const statuses = new Map((args.providerStatuses ?? []).map((status) => [status.providerName, status]));
   const statusesSupplied = args.providerStatuses !== undefined;
+  const opencodeConfigured = Boolean(
+    statuses.get("opencode")?.configured
+    || process.env.OPENCODE_API_KEY
+    || process.env.OPENCODE_ZEN_API_KEY,
+  );
   for (const candidate of candidates) {
+    // Prefer OpenCode over Cerebras when OpenCode is available.
+    if (candidate.providerName === "cerebras" && opencodeConfigured) continue;
     const status = statuses.get(candidate.providerName);
     const isSelected = args.selected?.providerName === candidate.providerName && args.selected?.model === candidate.model;
     if (!status && statusesSupplied) continue;

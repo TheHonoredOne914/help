@@ -33,8 +33,14 @@ export const ALL_PROVIDER_DESCRIPTORS: ProviderSettingsDescriptor[] = [
   {
     id: "openrouter", displayName: "OpenRouter", category: "generation",
     apiKeyField: "openrouterApiKey", headerName: "X-OpenRouter-Api-Key",
-    description: "100+ models via OpenRouter. Fallback provider.",
+    description: "Free OpenRouter models only.",
     docsUrl: "https://openrouter.ai", placeholder: "sk-or-...",
+  },
+  {
+    id: "opencode", displayName: "OpenCode Zen", category: "generation",
+    apiKeyField: "opencodeApiKey", headerName: "X-OpenCode-Api-Key",
+    description: "Free OpenCode Zen models. Nemotron, DeepSeek, Big Pickle.",
+    docsUrl: "https://opencode.ai/zen", placeholder: "oc-...",
   },
   {
     id: "github", displayName: "GitHub Models", category: "generation",

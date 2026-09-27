@@ -7,8 +7,10 @@ import { buildEvidencePacks } from "../../src/core/evidence/evidence-pack-builde
 import { buildClaimGraph } from "../../src/core/evidence/claim-graph.js";
 import { validateSourceUsageMap } from "../../src/core/evidence/source-usage-map.js";
 import { generateCoreResearchAnswer } from "../../src/core/generation/core-answer-generator.js";
-import { buildSourceUsageMapFromRegistry } from "../../src/core/evidence/source-usage-map.js";
 import type { ProviderRouter } from "../../src/core/providers/provider-router.js";
+import { buildModeSourceUsageMap } from "../helpers/source-usage-fixtures.js";
+import { buildPassingResearchAnswer } from "../helpers/passing-research-answer.js";
+import { RESEARCH_LIMITS } from "../../src/core/config/research-mode.js";
 
 function setup() {
   const agendaContract = buildAgendaContract({ requestId: "usage-test", originalUserQuery: "India democratic space 2022-2025 Freedom House V-Dem EIU UAPA FCRA ECI Supreme Court press freedom" });
@@ -78,14 +80,14 @@ test("core generator repairs thin final source selection before generation", asy
     evidenceRegistry,
     evidencePacks,
     claimGraph,
-    sourceUsageMaps: [buildSourceUsageMapFromRegistry("evidence_extractor", evidenceRegistry, agendaContract, 30)],
+    sourceUsageMaps: [buildModeSourceUsageMap("deep_research", "evidence_extractor", evidenceRegistry, agendaContract)],
     allowSyntheticSourceUsage: true,
     generationMode: "model",
     providerRouter: {
       complete: async () => ({
         provider: "gemini",
         model: "test",
-        content: `# Executive Thesis\nIndian Mock Parliament thesis with Treasury Bench, Opposition, POIs, rebuttals, motions, amendments, central contradiction and strategic synthesis. ${Array.from({ length: 30 }, (_, index) => evidenceRegistry.getCitationMarkdown(index + 1)).join(" ")}\n\n## Indian Mock Parliament Debate Utility Arsenal\nTreasury Bench arguments and Opposition arguments.\n\n## Methodology and Source Base\nSources are cited properly.\n\n## Indian Mock Parliament Debate Utility Arsenal\nTreasury Bench arguments and Opposition arguments.\nAmendment: Clause: 1.\n\n## Final Strategic Synthesis\nDo not summarize; diagnose strategy.\nDiagnosis: test. Prescription: test. Warning: test.`,
+        content: buildPassingResearchAnswer(evidenceRegistry, "deep_research"),
       }),
     } as unknown as ProviderRouter,
     providerName: "gemini",
@@ -94,7 +96,7 @@ test("core generator repairs thin final source selection before generation", asy
   });
 
   assert.equal(result.usedLegacyFallback, false);
-  assert.ok(result.uniqueCitedSourceCount >= 30);
+  assert.ok(result.uniqueCitedSourceCount >= RESEARCH_LIMITS.deep_research.minFinalUniqueCitedSources);
 });
 
 test("core generator passes with 30 unique cited sources across 9 buckets", async () => {
@@ -107,14 +109,14 @@ test("core generator passes with 30 unique cited sources across 9 buckets", asyn
     evidenceRegistry,
     evidencePacks,
     claimGraph,
-    sourceUsageMaps: [buildSourceUsageMapFromRegistry("evidence_extractor", evidenceRegistry, agendaContract, 30)],
+    sourceUsageMaps: [buildModeSourceUsageMap("deep_research", "evidence_extractor", evidenceRegistry, agendaContract)],
     allowSyntheticSourceUsage: true,
     generationMode: "model",
     providerRouter: {
       complete: async () => ({
         provider: "gemini",
         model: "test",
-        content: `# Executive Thesis\nIndian Mock Parliament thesis with Treasury Bench, Opposition, POIs, rebuttals, motions, amendments, central contradiction and strategic synthesis. ${Array.from({ length: 30 }, (_, index) => evidenceRegistry.getCitationMarkdown(index + 1)).join(" ")}\n\n## Indian Mock Parliament Debate Utility Arsenal\nTreasury Bench arguments and Opposition arguments.\n\n## Methodology and Source Base\nSources are cited properly.\n\n## Indian Mock Parliament Debate Utility Arsenal\nTreasury Bench arguments and Opposition arguments.\nAmendment: Clause: 1.\n\n## Final Strategic Synthesis\nDo not summarize; diagnose strategy.\nDiagnosis: test. Prescription: test. Warning: test.`,
+        content: buildPassingResearchAnswer(evidenceRegistry, "deep_research"),
       }),
     } as unknown as ProviderRouter,
     providerName: "gemini",
@@ -122,7 +124,7 @@ test("core generator passes with 30 unique cited sources across 9 buckets", asyn
   });
 
   assert.equal(result.usedLegacyFallback, false);
-  assert.ok(result.uniqueCitedSourceCount >= 30);
-  assert.ok(result.citationValidationReport.linkedCitationCount >= 30);
+  assert.ok(result.uniqueCitedSourceCount >= RESEARCH_LIMITS.deep_research.minFinalUniqueCitedSources);
+  assert.ok(result.citationValidationReport.linkedCitationCount >= RESEARCH_LIMITS.deep_research.minFinalUniqueCitedSources);
   assert.equal(result.qualityGateReport.passed, true);
 });

@@ -63,6 +63,29 @@ test("multiKeyFetch rotates GitHub model headers", async () => {
   }
 });
 
+test("multiKeyFetch surfaces an abort instead of returning a null response", async () => {
+  const originalFetch = globalThis.fetch;
+  const controller = new AbortController();
+  try {
+    globalThis.fetch = (async () => {
+      controller.abort();
+      const error = new Error("The operation was aborted");
+      error.name = "AbortError";
+      throw error;
+    }) as typeof fetch;
+
+    await assert.rejects(
+      () => multiKeyFetch("https://example.test/chat", {
+        signal: controller.signal,
+        headers: { Authorization: "Bearer header-key-one,header-key-two" },
+      }),
+      (error: unknown) => error instanceof Error && error.name === "AbortError",
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("multiKeyFetch retries Tavily usage-limit status 432", async () => {
   const originalFetch = globalThis.fetch;
   const seen: string[] = [];

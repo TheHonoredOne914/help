@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normalizeApiKeys } from "../../src/lib/normalize-keys.js";
+import { normalizeApiKeys, primaryApiKey } from "../../src/lib/normalize-keys.js";
 
 const touchedKeys = [
   "GROQ_API_KEY",
@@ -48,4 +48,9 @@ test("normalizeApiKeys promotes numbered slots into comma-separated fallback lis
     assert.equal(process.env.OPENROUTER_API_KEY, "or-one,or-two");
     assert.equal(process.env.OPENROUTER_KEY, "or-one,or-two");
   });
+});
+
+test("primaryApiKey returns first slot only", () => {
+  assert.equal(primaryApiKey("a,b,c"), "a");
+  assert.equal(primaryApiKey(undefined), undefined);
 });

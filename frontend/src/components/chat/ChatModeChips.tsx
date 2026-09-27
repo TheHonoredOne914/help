@@ -1,6 +1,10 @@
 import * as React from "react";
+
 import { ChevronLeft, ChevronRight, PenLine, Mic2, Globe, Layers, Users, type LucideIcon } from "lucide-react";
+
 import { cn } from "@/lib/utils";
+
+import type { ChatMode } from "./chat-model-routing";
 
 export type ChatModeChipId = "drafting" | "rhetorics" | "fast" | "deep" | "council";
 
@@ -10,6 +14,10 @@ export interface ChatModeChip {
   description: string;
   icon: LucideIcon;
   color: string;
+  bg: string;
+  border: string;
+  ring: string;
+  hex: string;
 }
 
 export const CHAT_MODE_CHIPS: ReadonlyArray<ChatModeChip> = [
@@ -18,42 +26,100 @@ export const CHAT_MODE_CHIPS: ReadonlyArray<ChatModeChip> = [
     label: "Drafting",
     description: "Draft speeches, clauses, and working papers using archive context.",
     icon: PenLine,
-    color: "#22c55e",
+    color: "text-[var(--ink)]",
+    bg: "bg-[var(--surface)]",
+    border: "border-[var(--line)]",
+    ring: "ring-[var(--ink)]",
+    hex: "var(--ink)",
   },
   {
     id: "rhetorics",
     label: "Rhetorics",
     description: "Build speeches, POIs, rebuttals, and floor interventions.",
     icon: Mic2,
-    color: "#8b5cf6",
+    color: "text-[var(--ink)]",
+    bg: "bg-[var(--surface-muted)]",
+    border: "border-[var(--ink)]/30",
+    ring: "ring-[var(--ink)]",
+    hex: "var(--ink)",
   },
   {
     id: "fast",
     label: "Fast Research",
     description: "Quick web lookups and fact-checking during committee sessions.",
     icon: Globe,
-    color: "#3b6fd4",
+    color: "text-[var(--navy)]",
+    bg: "bg-[color-mix(in_srgb,var(--navy)_12%,transparent)]",
+    border: "border-[color-mix(in_srgb,var(--navy)_28%,transparent)]",
+    ring: "ring-[var(--navy)]",
+    hex: "var(--navy)",
   },
   {
     id: "deep",
     label: "Deep Research",
     description: "Comprehensive synthesis targeting 20-30 cited sources.",
     icon: Layers,
-    color: "#3b6fd4",
+    color: "text-[var(--navy)]",
+    bg: "bg-[color-mix(in_srgb,var(--navy)_12%,transparent)]",
+    border: "border-[color-mix(in_srgb,var(--navy)_28%,transparent)]",
+    ring: "ring-[var(--navy)]",
+    hex: "var(--navy)",
   },
   {
     id: "council",
     label: "Council",
     description: "Six specialist councillors stress-test the agenda and prepare floor strategy.",
     icon: Users,
-    color: "#d4a03b",
+    color: "text-[var(--brass)]",
+    bg: "bg-[var(--accent-secondary-subtle)]",
+    border: "border-[var(--accent-secondary-border)]",
+    ring: "ring-[var(--brass)]",
+    hex: "var(--brass)",
   },
 ];
+
+const CHIP_BY_ID = Object.fromEntries(CHAT_MODE_CHIPS.map((chip) => [chip.id, chip])) as Record<ChatModeChipId, ChatModeChip>;
+
+export function chatModeToChipId(mode: ChatMode): ChatModeChipId {
+  switch (mode) {
+    case "fast_research":
+      return "fast";
+    case "deep_research":
+      return "deep";
+    case "council":
+      return "council";
+    default:
+      return "drafting";
+  }
+}
+
+export function getChatModeChip(id: ChatModeChipId): ChatModeChip {
+  return CHIP_BY_ID[id];
+}
+
+export function getChatModeMeta(mode: ChatMode): ChatModeChip {
+  return getChatModeChip(chatModeToChipId(mode));
+}
 
 export interface ChatModeChipsProps {
   activeId: ChatModeChipId;
   onSelect: (id: ChatModeChipId) => void;
   className?: string;
+}
+
+function selectedChipClass(id: ChatModeChipId): string {
+  switch (id) {
+    case "fast":
+      return "border-[var(--navy)] bg-[color-mix(in_srgb,var(--navy)_8%,transparent)] font-medium text-[var(--navy)]";
+    case "deep":
+      return "border-[var(--navy)] bg-[color-mix(in_srgb,var(--navy)_10%,transparent)] font-semibold text-[var(--navy)] shadow-[inset_0_0_0_1px_var(--navy)]";
+    case "council":
+      return "border-[var(--brass)] bg-[var(--accent-secondary-subtle)] font-semibold text-[var(--ink)]";
+    case "rhetorics":
+      return "border-[var(--ink)]/40 bg-[var(--surface-muted)] font-medium italic text-[var(--ink)]";
+    default:
+      return "border-[var(--line)] bg-[var(--surface)] font-medium text-[var(--ink)]";
+  }
 }
 
 export function ChatModeChips({ activeId, onSelect, className }: ChatModeChipsProps) {
@@ -105,7 +171,7 @@ export function ChatModeChips({ activeId, onSelect, className }: ChatModeChipsPr
         disabled={!canScrollLeft}
         aria-label="Previous modes"
         className={cn(
-          "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border/70 bg-background/85 text-muted-foreground shadow-sm transition sm:hidden",
+          "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[var(--line)] bg-[var(--surface)] text-[var(--slate)] transition sm:hidden",
           canScrollLeft ? "opacity-100" : "pointer-events-none opacity-0",
         )}
       >
@@ -121,37 +187,37 @@ export function ChatModeChips({ activeId, onSelect, className }: ChatModeChipsPr
           const Icon = chip.icon;
           const active = chip.id === activeId;
           return (
-          <button
-            key={chip.id}
-            role="tab"
-            type="button"
-            aria-selected={active}
-            onClick={() => onSelect(chip.id)}
-            className={cn(
-              "group/chip relative flex h-8 shrink-0 snap-start items-center gap-1.5 rounded-full border px-2.5 text-[11px] font-medium transition-all sm:h-7",
-              "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-400/60",
-              active
-                ? "border-amber-500/70 bg-amber-500/10 text-amber-700 shadow-[0_0_0_1px_rgba(212,160,59,0.18)] dark:text-amber-100"
-                : "border-border/70 bg-background/50 text-foreground/70 hover:border-border hover:bg-muted/60 hover:text-foreground dark:border-white/10 dark:bg-white/[0.02] dark:text-zinc-300 dark:hover:border-white/20 dark:hover:bg-white/[0.05] dark:hover:text-zinc-100",
-            )}
-            data-testid={`composer-chip-${chip.id}`}
-            title={chip.description}
-          >
-            <span
+            <button
+              key={chip.id}
+              role="tab"
+              type="button"
+              aria-selected={active}
+              onClick={() => onSelect(chip.id)}
               className={cn(
-                "h-1.5 w-1.5 shrink-0 rounded-full transition-all",
-                active ? "shadow-[0_0_8px_2px_rgba(212,160,59,0.55)]" : "opacity-60",
+                "group/chip relative flex h-8 shrink-0 snap-start items-center gap-1.5 rounded-sm border px-2.5 text-xs transition-all sm:h-7",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--navy)]/40",
+                active
+                  ? selectedChipClass(chip.id)
+                  : "border-[var(--line)] bg-[var(--surface)] font-medium text-[var(--ink)]/70 hover:border-[var(--navy)]/35 hover:bg-[var(--surface-muted)]/60 hover:text-[var(--ink)]",
               )}
-              style={{ backgroundColor: active ? "#d4a03b" : chip.color }}
-              aria-hidden
-            />
-            <Icon
-              className="h-3 w-3 shrink-0"
-              style={{ color: active ? "#d4a03b" : chip.color }}
-              aria-hidden
-            />
-            <span className="whitespace-nowrap">{chip.label}</span>
-          </button>
+              data-testid={`composer-chip-${chip.id}`}
+              title={chip.description}
+            >
+              <span
+                className={cn(
+                  "h-1.5 w-1.5 shrink-0 rounded-full transition-opacity",
+                  active ? "opacity-100" : "opacity-60",
+                )}
+                style={{ backgroundColor: chip.hex }}
+                aria-hidden
+              />
+              <Icon
+                className="h-3 w-3 shrink-0"
+                style={{ color: chip.hex }}
+                aria-hidden
+              />
+              <span className="whitespace-nowrap">{chip.label}</span>
+            </button>
           );
         })}
       </div>
@@ -161,7 +227,7 @@ export function ChatModeChips({ activeId, onSelect, className }: ChatModeChipsPr
         disabled={!canScrollRight}
         aria-label="More modes"
         className={cn(
-          "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border/70 bg-background/85 text-muted-foreground shadow-sm transition sm:hidden",
+          "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[var(--line)] bg-[var(--surface)] text-[var(--slate)] transition sm:hidden",
           canScrollRight ? "opacity-100" : "pointer-events-none opacity-0",
         )}
       >

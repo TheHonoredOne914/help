@@ -1,3 +1,4 @@
+import { multiKeyFetch } from "../../../lib/multi-key-fetch.js";
 import {
   fetchWithTimeout,
   redactKnownSecretValues,
@@ -107,7 +108,7 @@ export const geekflareExtractorProvider: ExtractorProvider = {
     const safeUrl = await safeTargetUrl(url, options);
     const requestUrl = buildRequestUrl(safeUrl.href, env);
     const response = await fetchWithTimeout(
-      options.fetchFn ?? fetch,
+      options.fetchFn ?? multiKeyFetch,
       requestUrl,
       {
         method: "GET",

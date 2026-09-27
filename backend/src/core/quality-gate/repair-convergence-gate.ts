@@ -21,15 +21,22 @@ export function evaluateRepairConvergence(input: RepairConvergenceInput): Repair
   const changed = input.previousText !== input.repairedText;
   const beforeIssueCount = countIssues(input.beforeReport);
   const afterIssueCount = countIssues(input.afterReport);
-  const scoreImproved = input.afterReport.score > input.beforeReport.score;
   const issuesReduced = afterIssueCount < beforeIssueCount;
-  const fatalReduced = (input.afterReport.fatalIssues ?? []).length < (input.beforeReport.fatalIssues ?? []).length;
-  const accepted = changed && (scoreImproved || issuesReduced || fatalReduced) && input.afterReport.score >= input.beforeReport.score - 3;
+  const beforeFatals = input.beforeReport.fatalIssues ?? [];
+  const afterFatals = input.afterReport.fatalIssues ?? [];
+  const fatalIntroduced = afterFatals.some((issue) => !beforeFatals.includes(issue));
+  const scoreHeld = input.afterReport.score >= input.beforeReport.score;
+  const accepted = changed
+    && issuesReduced
+    && scoreHeld
+    && !fatalIntroduced
+    && afterFatals.length <= beforeFatals.length;
   const reasons: string[] = [];
   if (!changed) reasons.push("text did not change");
-  if (!scoreImproved && !issuesReduced && !fatalReduced) reasons.push("no quality improvement");
-  if (input.afterReport.score < input.beforeReport.score - 3) reasons.push("quality got worse");
-  if (accepted) reasons.push("quality improved");
+  if (!issuesReduced) reasons.push("issue count did not decrease");
+  if (!scoreHeld) reasons.push("quality got worse");
+  if (fatalIntroduced) reasons.push("repair introduced new fatal issues");
+  if (accepted) reasons.push("quality improved on targeted issues");
   return {
     accepted,
     changed,

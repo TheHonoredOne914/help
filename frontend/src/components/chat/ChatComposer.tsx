@@ -82,10 +82,10 @@ export function ChatComposer({
     >
       {/* Overlays above the composer */}
       {enhancedNotice && (
-        <div className="mb-2 flex items-center justify-between gap-2 rounded-xl border border-[#3b6fd430] bg-[#3b6fd414] px-3 py-2 text-xs text-blue-700 animate-in slide-in-from-top-1 dark:text-[#a8b9e8]">
+        <div className="mb-2 flex items-center justify-between gap-2 rounded-xl border border-[color-mix(in_srgb,var(--navy)_19%,transparent)] bg-[color-mix(in_srgb,var(--navy)_8%,transparent)] px-3 py-2 text-xs text-[var(--navy)] animate-in slide-in-from-top-1">
           <div className="flex items-center gap-1.5">
             <Wand2 className="h-3.5 w-3.5 shrink-0" />
-            <span>Prompt enhanced —{" "}
+            <span>Prompt enhanced.{" "}
               <button onClick={enhancedNotice.onRestore} className="underline hover:no-underline">
                 restore original
               </button>
@@ -95,16 +95,16 @@ export function ChatComposer({
       )}
       {researchProviderUnavailable && (
         <div className="mb-2 rounded-xl border border-red-500/40 bg-red-50 px-3 py-2 text-xs text-red-700 backdrop-blur-xl dark:bg-red-950/40 dark:text-red-200">
-          Configure provider keys before running research or web search.
+          Configure provider keys in Settings before running research.
         </div>
       )}
 
       {/* Floating rounded panel */}
       <div
         className={cn(
-          "rounded-[20px] border border-amber-500/25 bg-background/[0.92] backdrop-blur-2xl sm:rounded-[24px]",
-          "shadow-[0_10px_24px_-12px_rgba(15,23,42,0.2),0_0_0_1px_rgba(212,160,59,0.08)] sm:shadow-[0_10px_28px_-10px_rgba(15,23,42,0.22),0_0_0_1px_rgba(212,160,59,0.10),0_0_24px_-6px_rgba(212,160,59,0.18)]",
-          "ring-1 ring-inset ring-black/[0.04] dark:bg-zinc-950/80 dark:shadow-[0_10px_28px_-10px_rgba(0,0,0,0.55),0_0_0_1px_rgba(212,160,59,0.10),0_0_24px_-6px_rgba(212,160,59,0.22)] dark:ring-white/[0.04]",
+          "rounded-lg border border-[color-mix(in_srgb,var(--brass)_25%,transparent)] bg-[var(--paper)]/[0.92] backdrop-blur-2xl sm:rounded-lg",
+          "shadow-[0_10px_24px_-12px_rgba(15,23,42,0.2),0_0_0_1px_rgba(212,160,59,0.08)] sm:shadow-[0_10px_28px_-10px_rgba(15,23,42,0.22),0_0_0_1px_rgba(212,160,59,0.10)]",
+          "ring-1 ring-inset ring-black/[0.04] dark:bg-[var(--surface)]/80 dark:shadow-[0_10px_28px_-10px_rgba(0,0,0,0.55),0_0_0_1px_rgba(212,160,59,0.10)] dark:ring-white/[0.04]",
           "transition-shadow",
         )}
         data-testid="chat-composer-panel"
@@ -121,10 +121,10 @@ export function ChatComposer({
                   aria-label={showOptions ? "Hide model options" : "Show model options"}
                   className={cn(
                     "ml-auto inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border transition-colors sm:h-7 sm:w-7",
-                    "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-400/60",
+                    "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--brass)]/60",
                     showOptions
-                      ? "border-amber-400/60 bg-amber-400/10 text-amber-200"
-                      : "border-border/70 bg-background/60 text-foreground/70 hover:border-border hover:bg-muted/60 hover:text-foreground dark:border-white/10 dark:bg-white/[0.02] dark:text-zinc-300 dark:hover:border-white/20 dark:hover:bg-white/[0.05] dark:hover:text-zinc-100",
+                      ? "border-[color-mix(in_srgb,var(--brass)_60%,transparent)] bg-[color-mix(in_srgb,var(--brass)_10%,transparent)] text-amber-700 dark:text-amber-400"
+                      : "border-[var(--line)]/70 bg-[var(--surface)]/60 text-[var(--ink)]/70 hover:border-[var(--line)] hover:bg-[var(--surface-muted)]/60 hover:text-[var(--ink)] dark:border-white/10 dark:bg-white/[0.02] dark:text-zinc-300 dark:hover:border-white/20 dark:hover:bg-white/[0.05] dark:hover:text-zinc-100",
                   )}
                   data-testid="button-composer-options-toggle"
                 >
@@ -138,11 +138,11 @@ export function ChatComposer({
 
         {/* Optional status / model summary row */}
         {(statusBadge || modelSummary) && (
-          <div className="flex min-w-0 items-center gap-2 px-3 pb-1 text-[10px] text-muted-foreground">
+          <div className="flex min-w-0 items-center gap-2 px-3 pb-1 text-2xs text-[var(--slate)]">
             {statusBadge && (
               <span
                 className={cn(
-                  "inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold",
+                  "inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-2xs font-semibold",
                   statusBadge.color,
                   statusBadge.bg,
                   statusBadge.border,
@@ -171,11 +171,11 @@ export function ChatComposer({
 
         {/* Bottom: keyboard hint + actions */}
         <div className="flex min-w-0 items-center justify-between gap-2 px-2 pt-0.5 pb-2 sm:px-2.5 sm:pb-1.5">
-          <span className="hidden min-w-0 items-center gap-1.5 truncate text-[10px] text-muted-foreground sm:inline-flex">
-            <kbd className="rounded bg-muted px-1 py-0.5 font-mono text-[10px] text-foreground/70">Enter</kbd>
+          <span className="hidden min-w-0 items-center gap-1.5 truncate text-2xs text-[var(--slate)] sm:inline-flex">
+            <kbd className="rounded bg-[var(--surface-muted)] px-1 py-0.5 font-mono text-2xs text-[var(--ink)]/70">Enter</kbd>
             to send
           </span>
-          <span className="hidden items-center gap-1.5 text-[10px] text-muted-foreground min-[420px]:inline-flex sm:hidden">
+          <span className="hidden items-center gap-1.5 text-2xs text-[var(--slate)] min-[420px]:inline-flex sm:hidden">
             <Wand2 className="h-3 w-3" />
             Tap to enhance
           </span>

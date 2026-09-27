@@ -12,10 +12,9 @@ test("research modes change query, enrichment, source, and repair limits", () =>
   const full = modeRetrievalOptions("council");
 
   assert.ok(fast.maxRawResults < deep.maxRawResults);
-  assert.ok(deep.maxRawResults < phd.maxRawResults);
-  assert.ok(full.maxSourcesToEnrich >= phd.maxSourcesToEnrich);
-  assert.equal(phd.minFinalUniqueCitedSources, 30);
-  assert.equal(full.minFinalUniqueCitedSources, 30);
+  assert.ok(deep.maxSourcesToEnrich <= full.maxSourcesToEnrich);
+  assert.equal(phd.minFinalUniqueCitedSources, 45);
+  assert.equal(full.minFinalUniqueCitedSources, 110);
 });
 
 test("explicit UI mode overrides text inference for source targets", () => {

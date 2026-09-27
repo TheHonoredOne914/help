@@ -34,7 +34,10 @@ export function hydrateExtractionCooldown(state: ExtractionCooldownState, option
         state.jinaTimeoutCount = Math.max(state.jinaTimeoutCount, value.timeoutCount);
         state.jinaCooledDown = true;
       }
-      for (const url of value.jina422Urls ?? []) state.jina422Urls.add(url);
+      for (const url of value.jina422Urls ?? []) {
+        const key = canonicalizeUrl(url);
+        if (key) state.jina422Urls.add(key);
+      }
     }
     if (cooldownActive && value.cooldownUntil) {
       emitProviderCooldown(options.emit, { provider, stage: "extraction", cooldownUntil: value.cooldownUntil, active: true });

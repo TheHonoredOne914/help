@@ -24,18 +24,18 @@ export function SourceContractPanel({ contract, gapReport }: SourceContractPanel
   return (
     <div className={cn(
       "rounded-lg border p-2.5",
-      hasActualGap ? "border-amber-300/50 bg-amber-500/10" : "border-border/40 bg-background/70",
+      hasActualGap ? "border-amber-300/50 bg-amber-500/10" : "border-[var(--line)]/40 bg-[var(--surface)]/70",
     )}>
-      <p className={cn("text-[10px] font-semibold", hasActualGap ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground")}>
+      <p className={cn("text-2xs font-semibold", hasActualGap ? "text-amber-700 dark:text-amber-300" : "text-[var(--slate)]")}>
         Source Contract
       </p>
       {contract && (
         <>
-          <p className="mt-1 text-[12px] font-semibold text-foreground">
+          <p className="mt-1 text-sm font-semibold text-[var(--ink)]">
             {contract.citationEligibleSources} eligible / {contract.requiredUniqueCitedSources} cited target
           </p>
           {/* Fix (Bug: L12): guard against division by zero when roleCount is 0 */}
-          <p className="mt-1 text-[10px] text-muted-foreground">
+          <p className="mt-1 text-2xs text-[var(--slate)]">
             {roleCount > 0
               ? `${passedRoles}/${roleCount} roles passed, ${contract.requiredEvidenceCardsPerModel} cards each`
               : `${contract.requiredEvidenceCardsPerModel} evidence cards required`}
@@ -44,13 +44,13 @@ export function SourceContractPanel({ contract, gapReport }: SourceContractPanel
       )}
       {/* Fix (Bug: L36): show gap details even when contract is null */}
       {gapReport && (
-        <p className="mt-1 text-[10px] text-muted-foreground">
+        <p className="mt-1 text-2xs text-[var(--slate)]">
           Available {gapReport.availableCitationEligibleSources}/{gapReport.requiredUniqueSources}.{" "}
           {gapReport.explanation || "Targets were not fully met."}
         </p>
       )}
       {(failedBuckets.length > 0 || weakBuckets.length > 0) && (
-        <p className="mt-1 line-clamp-2 text-[10px] text-muted-foreground">
+        <p className="mt-1 line-clamp-2 text-2xs text-[var(--slate)]">
           {/* Fix: buckets already use replace in render — join with ", " and wrap */}
           Buckets: {[...failedBuckets, ...weakBuckets]
             .map((bucket) => bucket.replace(/_/g, " "))
@@ -58,7 +58,7 @@ export function SourceContractPanel({ contract, gapReport }: SourceContractPanel
         </p>
       )}
       {contract?.roles.some((role) => !role.passed) && (
-        <p className="mt-1 line-clamp-2 text-[10px] text-muted-foreground">
+        <p className="mt-1 line-clamp-2 text-2xs text-[var(--slate)]">
           {/* Fix (Bug: L46): format technical role codes to be human-readable */}
           Missing: {contract.roles
             .filter((role) => !role.passed)

@@ -7,9 +7,9 @@ test("Groq native ID becomes groq/<id>", () => {
   assert.deepEqual(
     buildHealthyResearchModels(
       { groq: healthy("groq") } as ProviderStatusMap,
-      { groq: normalizeProviderModels("groq", ["llama-3.3-70b-versatile"]) } as ProviderModels,
+      { groq: normalizeProviderModels("groq", ["openai/gpt-oss-120b"]) } as ProviderModels,
     ),
-    ["groq/llama-3.3-70b-versatile"],
+    ["groq/openai/gpt-oss-120b"],
   );
 });
 
@@ -30,9 +30,9 @@ test("Groq catalog fallback models remain selectable for explicit user choice", 
           catalogFallbackOnly: true,
         },
       } as ProviderStatusMap,
-      { groq: normalizeProviderModels("groq", ["llama-3.3-70b-versatile"]) } as ProviderModels,
+      { groq: normalizeProviderModels("groq", ["openai/gpt-oss-120b"]) } as ProviderModels,
     ),
-    ["groq/llama-3.3-70b-versatile"],
+    ["groq/openai/gpt-oss-120b"],
   );
 });
 
@@ -40,19 +40,37 @@ test("already-prefixed Groq ID is not double-prefixed", () => {
   assert.deepEqual(
     buildHealthyResearchModels(
       { groq: healthy("groq") } as ProviderStatusMap,
-      { groq: normalizeProviderModels("groq", ["groq/llama-3.3-70b-versatile"]) } as ProviderModels,
+      { groq: normalizeProviderModels("groq", ["groq/openai/gpt-oss-120b"]) } as ProviderModels,
     ),
-    ["groq/llama-3.3-70b-versatile"],
+    ["groq/openai/gpt-oss-120b"],
   );
 });
 
-test("NVIDIA moonshotai/kimi-k2.6 preserves nested path", () => {
+test("known-unavailable Groq llama 3.3 is dropped from selectable lists", () => {
+  assert.deepEqual(
+    normalizeProviderModels("groq", ["llama-3.3-70b-versatile", "openai/gpt-oss-120b"]),
+    [{ id: "openai/gpt-oss-120b" }],
+  );
+  assert.deepEqual(
+    buildHealthyResearchModels(
+      { groq: healthy("groq") } as ProviderStatusMap,
+      { groq: normalizeProviderModels("groq", ["llama-3.3-70b-versatile", "openai/gpt-oss-120b"]) } as ProviderModels,
+    ),
+    ["groq/openai/gpt-oss-120b"],
+  );
+});
+
+test("stale NVIDIA kimi-k2.6 is dropped from selectable lists", () => {
+  assert.deepEqual(normalizeProviderModels("nvidia", [{ id: "moonshotai/kimi-k2.6" }]), []);
+});
+
+test("NVIDIA nested path is preserved for supported models", () => {
   assert.deepEqual(
     buildHealthyResearchModels(
       { nvidia: healthy("nvidia") } as ProviderStatusMap,
-      { nvidia: normalizeProviderModels("nvidia", [{ id: "moonshotai/kimi-k2.6" }]) } as ProviderModels,
+      { nvidia: normalizeProviderModels("nvidia", [{ id: "meta/llama-3.1-8b-instruct" }]) } as ProviderModels,
     ),
-    ["nvidia/moonshotai/kimi-k2.6"],
+    ["nvidia/meta/llama-3.1-8b-instruct"],
   );
 });
 
@@ -60,9 +78,20 @@ test("OpenRouter nested IDs preserve nested path", () => {
   assert.deepEqual(
     buildHealthyResearchModels(
       { openrouter: healthy("openrouter") } as ProviderStatusMap,
-      { openrouter: normalizeProviderModels("openrouter", [{ id: "anthropic/claude-sonnet-4.5" }]) } as ProviderModels,
+      { openrouter: normalizeProviderModels("openrouter", [{ id: "qwen/qwen3-32b:free" }]) } as ProviderModels,
     ),
-    ["openrouter/anthropic/claude-sonnet-4.5"],
+    ["openrouter/qwen/qwen3-32b:free"],
+  );
+});
+
+test("OpenRouter paid models are dropped from selectable lists", () => {
+  assert.deepEqual(
+    normalizeProviderModels("openrouter", [
+      { id: "anthropic/claude-sonnet-4.5" },
+      { id: "qwen/qwen3-32b:free" },
+      { id: "meta-llama/llama-3.1-8b-instruct", badge: "free" },
+    ]).map((model) => model.id),
+    ["qwen/qwen3-32b:free", "meta-llama/llama-3.1-8b-instruct"],
   );
 });
 

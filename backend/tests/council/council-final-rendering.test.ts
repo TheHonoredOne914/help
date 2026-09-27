@@ -99,19 +99,34 @@ function citedSourceIds(value: string): number[] {
     .filter((id) => Number.isInteger(id) && id > 0))].sort((a, b) => a - b);
 }
 
-test("Council final answer appends cited evidence to meet post-render source and word gates", () => {
+test("Council final answer returns session prose without deterministic padding", () => {
   const answer = __councilTestHooks.buildCouncilFinalAnswer(makeSession(), makeRetrieval(185));
   const citedIds = citedSourceIds(answer);
 
-  assert.match(answer, /## Additional Evidence Bullets/);
-  assert.equal(citedIds.length, 180);
-  assert.equal(citedIds[0], 1);
-  assert.equal(citedIds.at(-1), 180);
-  assert.ok(wordCount(answer) >= 3000);
-  assert.ok(wordCount(answer) <= 5500);
+  assert.doesNotMatch(answer, /## Additional Evidence Bullets/);
+  assert.ok(citedIds.length < 110);
+  assert.match(answer, /Council Session/);
+  assert.ok(wordCount(answer) < 3000);
 });
 
-test("Council metadata uses requiredSources 180 and counts rendered final citations only", () => {
+test("Council quality gate runs on unpadded final answer", () => {
+  const session = makeSession();
+  const retrieval = makeRetrieval(185);
+  const answer = __councilTestHooks.buildCouncilFinalAnswer(session, retrieval);
+  const gate = __councilTestHooks.runCouncilQualityGate(session, retrieval, answer, {
+    runId: "run-test",
+    requestId: "request-test",
+    conversationId: 1,
+    queryHash: "hash",
+    researchMode: "council",
+    createdAt: "2026-06-06T00:00:00.000Z",
+  });
+  assert.equal(typeof gate.score, "number");
+  assert.equal(gate.passed, false);
+  assert.ok(gate.automaticFailures.some((failure) => /final_answer_too_short|citation|source/i.test(failure)));
+});
+
+test("Council metadata uses requiredSources 110 and counts rendered final citations only", () => {
   const metadata = __councilTestHooks.buildCouncilMetadata(
     {
       runId: "run-test",
@@ -131,7 +146,7 @@ test("Council metadata uses requiredSources 180 and counts rendered final citati
     ].join(" "),
   );
 
-  assert.equal(metadata.sourceContract.requiredSources, 180);
+  assert.equal(metadata.sourceContract.requiredSources, 110);
   assert.equal(metadata.sourceContract.finalUniqueCitedSources, 3);
   assert.equal(metadata.citationStatus?.finalUniqueCitedSources, 3);
   assert.deepEqual(metadata.citationStatus?.citedSourceIds, [1, 2, 4]);

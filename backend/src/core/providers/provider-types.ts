@@ -1,4 +1,4 @@
-export type ProviderName = "groq" | "openrouter" | "gemini" | "nvidia" | "github" | "cerebras" | "openai";
+export type ProviderName = "groq" | "openrouter" | "gemini" | "nvidia" | "github" | "cerebras" | "openai" | "opencode";
 
 export interface ProviderRequest {
   model: string;

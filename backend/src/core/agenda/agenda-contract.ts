@@ -276,7 +276,7 @@ function forbiddenDriftTermsForAgenda(normalizedAgenda: string): string[] {
   const lower = normalizedAgenda.toLowerCase();
   const allowsAiElectionContent = /\b(deepfakes?|deep-fakes?|synthetic\s+political\s+content|ai-generated|online\s+political\s+advertising|platform\s+transparency)\b/i.test(normalizedAgenda);
   return DEFAULT_FORBIDDEN_DRIFT_TERMS.filter((term) => {
-    if (allowsAiElectionContent && /^(artificial intelligence|AI-generated|generative AI|deepfakes)$/i.test(term)) return false;
+    if (allowsAiElectionContent && /^(artificial intelligence|AI-generated|generative AI|deepfakes|AI tools|algorithmic bias|AI surveillance|AI governance)$/i.test(term)) return false;
     return !lower.includes(term.toLowerCase());
   });
 }

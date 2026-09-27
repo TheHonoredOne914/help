@@ -1,6 +1,16 @@
 import { useReducer, useCallback } from "react";
 import type { VerificationResult, ExhaustedState } from "@/components/chat/research-pipeline";
-import { getRunStatusSemantics } from "@/lib/run-state/status-semantics";
+import {
+  getRunStatusSemantics,
+  getPipelineTerminalStatusSemantics,
+} from "@/lib/run-state/status-semantics";
+
+export { getPipelineTerminalStatusSemantics };
+import {
+  getResearchModeProfile,
+  type PipelinePurgeField,
+  type ResearchModeProfileId,
+} from "@/lib/research-mode-ui";
 import {
   type CouncilDispute,
   type CouncilSeal,
@@ -38,6 +48,7 @@ export interface FoundResult {
 
 export interface FullSourceManifestSource {
   index: number;
+  sourceId?: number;
   title: string;
   url: string;
   badge: string;
@@ -137,34 +148,6 @@ export type PipelineRunStatus =
   | "legacy_fallback_used";
 
 export type PipelineStatusSeverity = "success" | "warning" | "error" | "info";
-
-export interface PipelineTerminalStatusSemantics {
-  isTerminal: boolean;
-  isSuccessful: boolean;
-  severity: PipelineStatusSeverity;
-  label: string;
-}
-
-export function getPipelineTerminalStatusSemantics(status: PipelineRunStatus): PipelineTerminalStatusSemantics {
-  switch (status) {
-    case "completed":
-      return { isTerminal: true, isSuccessful: true, severity: "success", label: "Research Complete" };
-    case "completed_with_source_gaps":
-      return { isTerminal: true, isSuccessful: false, severity: "warning", label: "Completed With Source Gaps" };
-    case "legacy_fallback_used":
-      return { isTerminal: true, isSuccessful: false, severity: "warning", label: "Legacy Fallback Used" };
-    case "degraded_fallback":
-      return { isTerminal: true, isSuccessful: false, severity: "warning", label: "Degraded Fallback" };
-    case "provider_error":
-      return { isTerminal: true, isSuccessful: false, severity: "error", label: "Provider Error" };
-    case "failed":
-      return { isTerminal: true, isSuccessful: false, severity: "error", label: "Research Failed" };
-    case "cancelled":
-      return { isTerminal: true, isSuccessful: false, severity: "info", label: "Research Cancelled" };
-    default:
-      return { isTerminal: false, isSuccessful: false, severity: "info", label: "Research Running" };
-  }
-}
 
 export interface CitationStatusSummary {
   finalUniqueCitedSources: number;
@@ -354,7 +337,13 @@ export const initialPipelineState: PipelineState = {
 
 export type PipelineAction =
   | { type: "RESET" }
-  | { type: "SET_ACTIVE_RUN"; runId: string; assistantMessageId?: number | string | null; conversationId?: number | string | null }
+  | {
+      type: "SET_ACTIVE_RUN";
+      runId: string;
+      assistantMessageId?: number | string | null;
+      conversationId?: number | string | null;
+      researchMode?: ResearchModeProfileId;
+    }
   | { type: "IGNORED_STALE_EVENT" }
   | { type: "RUN_STATUS"; status: PipelineRunStatus }
   | { type: "EFFECTIVE_MODELS"; models: string[] }
@@ -421,6 +410,67 @@ export type PipelineAction =
       govReports:  string[];
     }
   | { type: "DATA_CHEATSHEET"; cheatsheet: DataCheatsheet };
+
+function applyPipelineFieldPurge(
+  state: PipelineState,
+  fields: readonly PipelinePurgeField[],
+): PipelineState {
+  if (fields.length === 0) return state;
+  const next = { ...state };
+  for (const field of fields) {
+    switch (field) {
+      case "councilSession":
+        next.councilSession = null;
+        break;
+      case "dimensionScores":
+        next.dimensionScores = null;
+        break;
+      case "activeDivisions":
+        next.activeDivisions = [];
+        break;
+      case "completedDivisions":
+        next.completedDivisions = [];
+        break;
+      case "divisionProgress":
+        next.divisionProgress = null;
+        break;
+      case "divisionOutputs":
+        next.divisionOutputs = {};
+        break;
+      case "customModelFound":
+        next.customModelFound = {};
+        break;
+      case "researchPlan":
+        next.researchPlan = [];
+        break;
+      case "sourceContract":
+        next.sourceContract = null;
+        break;
+      case "coreQualityGate":
+        next.coreQualityGate = null;
+        break;
+      case "selectedResearchMode":
+        next.selectedResearchMode = null;
+        break;
+      case "discussion":
+        next.discussion = null;
+        next.isDiscussing = false;
+        break;
+      case "topicStrategy":
+        next.topicStrategy = null;
+        break;
+      case "archiveRouting":
+        next.archiveRouting = null;
+        break;
+      case "researchAngles":
+        next.researchAngles = [];
+        break;
+      default:
+        break;
+    }
+  }
+  return next;
+}
 
 function createRunState(
   runId: string,
@@ -525,7 +575,7 @@ export function pipelineReducer(state: PipelineState, action: PipelineAction): P
       nextRun.assistantMessageId = action.assistantMessageId ?? nextRun.assistantMessageId;
       nextRun.conversationId = action.conversationId ?? nextRun.conversationId;
       nextRun.status = "running";
-      return {
+      const baseState: PipelineState = {
         ...state,
         activeRunIdByConversationId: conversationKey
           ? { ...state.activeRunIdByConversationId, [conversationKey]: action.runId }
@@ -539,9 +589,11 @@ export function pipelineReducer(state: PipelineState, action: PipelineAction): P
         activeConversationId: action.conversationId ?? null,
         streamingContent: "",
         runStatus: "running",
-        // Reset core pipeline events on new run to prevent stale events from showing
         corePipelineEvents: [],
       };
+      if (!action.researchMode) return baseState;
+      const profile = getResearchModeProfile(action.researchMode);
+      return applyPipelineFieldPurge(baseState, profile.purgeOnRunStart);
     }
 
     case "IGNORED_STALE_EVENT":

@@ -1,4 +1,4 @@
-import { describe, it, before } from "node:test";
+import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { decideFinalResearchStatus } from "../../src/core/pipeline/final-status.js";
 
@@ -16,13 +16,12 @@ describe("final status degraded fallback", () => {
     citationStatus: { finalUniqueCitedSources: 5 },
   };
 
-  it("should return completed_with_source_gaps when provider_error but citations exist", () => {
+  it("should return provider_error when provider_error is present even with citations", () => {
     const result = decideFinalResearchStatus({
       ...baseInput,
       providerError: new Error("NVIDIA timeout"),
-      citedSources: 5,
     });
-    assert.equal(result, "completed_with_source_gaps");
+    assert.equal(result, "provider_error");
   });
 
   it("should return provider_error when no citations exist", () => {
@@ -32,7 +31,7 @@ describe("final status degraded fallback", () => {
       citationStatus: { finalUniqueCitedSources: 0 },
       providerError: new Error("All providers failed"),
     });
-    assert.equal(result, "failed");
+    assert.equal(result, "provider_error");
   });
 
   it("should return legacy_fallback_used when degradedFallbackUsed and providerError with citations", () => {
@@ -52,13 +51,13 @@ describe("final status degraded fallback", () => {
     assert.equal(result, "completed");
   });
 
-  it("should return failed when citedSources is 0 regardless of providerError", () => {
+  it("should return provider_error when citedSources is 0 regardless of providerError", () => {
     const result = decideFinalResearchStatus({
       ...baseInput,
       sourceContract: { ...baseInput.sourceContract, finalUniqueCitedSources: 0, status: "failed" as const },
       citationStatus: { finalUniqueCitedSources: 0 },
       providerError: new Error("fail"),
     });
-    assert.equal(result, "failed");
+    assert.equal(result, "provider_error");
   });
 });

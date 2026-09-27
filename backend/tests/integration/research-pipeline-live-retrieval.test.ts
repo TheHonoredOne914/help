@@ -7,7 +7,7 @@ import { buildEvidenceRegistryFromSources } from "../../src/core/evidence/eviden
 import { getSourceUsagePolicy } from "../../src/core/config/source-usage-policy.js";
 import type { ProviderRouter } from "../../src/core/providers/provider-router.js";
 
-test("live retrieval path returns SourceGapReport when no search keys exist", async () => {
+test("live retrieval path fails closed with SourceGapReport when no search keys exist", async () => {
   const result = await runResearchPipeline({
     requestId: "live-gap",
     userQuery: "India democratic space 2022-2025",
@@ -22,10 +22,12 @@ test("live retrieval path returns SourceGapReport when no search keys exist", as
 
   assert.equal(result.evidenceRegistry.getCitationEligibleCount(), 0);
   assert.ok(result.sourceGapReport);
-  assert.equal(result.usedLegacyFallback, true);
+  assert.equal(result.usedLegacyFallback, false);
+  assert.equal(result.terminalStatus, "failed");
+  assert.match(result.finalAnswer, /Insufficient Sources/i);
 });
 
-test("source gap path surfaces provider failure unless fallback is explicit", async () => {
+test("source gap path fails closed before generation when retrieval yields no eligible sources", async () => {
   const providerRouter = {
     hasProvider: () => true,
     completeJson: async () => ({ json: { sourceUsageMap: [] } }),
@@ -34,7 +36,7 @@ test("source gap path surfaces provider failure unless fallback is explicit", as
     },
   } as unknown as ProviderRouter;
 
-  await assert.rejects(() => runResearchPipeline({
+  const result = await runResearchPipeline({
     requestId: "live-gap-provider-failure",
     userQuery: "India democratic space 2022-2025 press freedom",
     mode: "deep_research",
@@ -46,10 +48,14 @@ test("source gap path surfaces provider failure unless fallback is explicit", as
     providerRouter,
     providerName: "groq",
     model: "test",
-  }), /Provider test failure|Core generation provider failed|provider error|legacy fallback is disabled/i);
+  });
+
+  assert.equal(result.terminalStatus, "failed");
+  assert.equal(result.usedCoreGeneration, false);
+  assert.match(result.finalAnswer, /Insufficient Sources/i);
 });
 
-test("source usage shortfall creates SourceGapReport even when enough sources were retrieved", () => {
+test("source usage shortfall does not mint a gap-pass report when fast policy forbids source gaps", () => {
   const contract = buildAgendaContract({
     requestId: "usage-gap",
     originalUserQuery: "UGC regulations 2026 Indian higher education academic autonomy",
@@ -97,7 +103,60 @@ test("source usage shortfall creates SourceGapReport even when enough sources we
     [],
   );
 
+  assert.equal(report, null);
+  assert.equal(getSourceUsagePolicy("fast_research").allowCompletedWithSourceGaps, false);
+});
+
+test("fast_research SourceUsageMap near-miss of 1 still builds a SourceGapReport", () => {
+  const contract = buildAgendaContract({
+    requestId: "near-miss-gap",
+    originalUserQuery: "UGC regulations 2026 India online political advertising",
+    outputDepth: "brief",
+  });
+  contract.minimumUniqueCitedSources = 40;
+  contract.minimumEvidenceCardsPerModel = 40;
+  const sources = Array.from({ length: 45 }, (_, index) => ({
+    title: `UGC source ${index + 1}`,
+    url: `https://example.gov.in/ugc-near-${index + 1}`,
+    canonicalUrl: `https://example.gov.in/ugc-near-${index + 1}`,
+    domain: "example.gov.in",
+    bucketIds: ["government_official"],
+    sourceClass: "official_government",
+    authorityScore: 80,
+    date: "2026-01-01",
+    fullText: `UGC regulations source ${index + 1} discusses higher education policy, academic autonomy, and implementation safeguards in India.`,
+    snippet: `UGC regulations source ${index + 1}`,
+    extractionQuality: "full",
+    keyFacts: [`UGC regulations source ${index + 1} has contentful policy evidence.`],
+    keyNumbers: [],
+    legalHoldings: [],
+    namedEntities: ["UGC"],
+    limitations: [],
+    confidence: "high",
+    citationEligible: true,
+  }));
+  const registry = buildEvidenceRegistryFromSources(sources as any, contract);
+  const policy = getSourceUsagePolicy("fast_research");
+  const report = buildSourceUsageGapReport(
+    contract,
+    registry,
+    {
+      outputs: [],
+      failureReports: [],
+      validUsageCount: policy.requiredSources - 1,
+      validUsedSourceIds: Array.from({ length: policy.requiredSources - 1 }, (_, index) => index + 1),
+      rolesPassed: 4,
+      rolesFailed: 0,
+      warningRoleCount: 0,
+      passed: false,
+      completedWithSourceGaps: false,
+    },
+    policy,
+    ["UGC regulations 2026 India"],
+    [],
+  );
+
   assert.ok(report);
-  assert.match(report.explanation, /12\/40/);
-  assert.equal(report.availableCitationEligibleSources, 45);
+  assert.equal(report?.requiredUniqueSources, policy.requiredSources);
+  assert.match(report?.explanation ?? "", /39\/40/);
 });

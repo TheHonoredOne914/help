@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Loader2, Send, Square, Wand2 } from "lucide-react";
+import { Send, Square, Wand2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -29,7 +29,7 @@ export function ChatComposerActions({
   onEnhance,
   className,
 }: ChatComposerActionsProps) {
-  const length = value.length;
+  const length = value.trim().length;
   const pct = Math.min(1, length / maxLength);
   const isDanger = length > maxLength;
   const isWarn = length > maxLength * 0.75;
@@ -50,19 +50,16 @@ export function ChatComposerActions({
             variant="ghost"
             size="sm"
             onClick={onEnhance}
+            loading={isEnhancing}
             disabled={!trimmed || isEnhancing || isStreaming || disabled}
             className={cn(
-              "h-8 gap-1.5 rounded-lg px-2 text-xs text-muted-foreground hover:bg-muted/70 hover:text-[#8a5b13] sm:px-2.5 dark:text-[#9a9ab0] dark:hover:bg-white/[0.04] dark:hover:text-[#d4a03b]",
-              trimmed && !isEnhancing && !isStreaming && "text-[#8a5b13] dark:text-[#d4a03b]",
+              "h-8 gap-1.5 rounded-lg px-2 text-xs text-[var(--slate)] hover:bg-[var(--surface-muted)]/70 hover:text-[#8a5b13] sm:px-2.5 dark:text-[var(--muted-ink)] dark:hover:bg-white/[0.04] dark:hover:text-[var(--brass)]",
+              trimmed && !isEnhancing && !isStreaming && "text-[#8a5b13] dark:text-[var(--brass)]",
             )}
             aria-label="Enhance prompt with AI"
             data-testid="button-enhance-prompt"
           >
-            {isEnhancing ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Wand2 className="h-3.5 w-3.5" />
-            )}
+            {!isEnhancing ? <Wand2 className="h-3.5 w-3.5" /> : null}
             <span className="hidden md:inline font-medium">Enhance</span>
           </Button>
         </TooltipTrigger>
@@ -71,7 +68,10 @@ export function ChatComposerActions({
 
       {/* Char counter with ring (middle) */}
       <div
-        className="hidden items-center gap-1.5 rounded-full border border-border/60 bg-background/65 px-2 py-1 min-[380px]:flex dark:border-white/5 dark:bg-white/[0.02]"
+        className={cn(
+          "items-center gap-1.5 rounded-full border border-[var(--line)]/60 bg-[var(--surface)]/65 px-2 py-1 dark:border-white/5 dark:bg-white/[0.02]",
+          isDanger ? "flex" : "hidden min-[380px]:flex",
+        )}
         data-testid="char-counter"
         title={`${length} / ${maxLength} chars`}
       >
@@ -83,7 +83,7 @@ export function ChatComposerActions({
             fill="none"
             stroke="currentColor"
             strokeWidth="2"
-            className="text-muted-foreground/20 dark:text-white/10"
+            className="text-[var(--slate)]/20 dark:text-white/10"
           />
           <circle
             cx="10"
@@ -100,19 +100,19 @@ export function ChatComposerActions({
               isDanger
                 ? "text-red-500"
                 : isWarn
-                  ? "text-amber-400"
-                  : "text-[#d4a03b]",
+                  ? "text-amber-600 dark:text-amber-400"
+                  : "text-[var(--brass)]",
             )}
           />
         </svg>
         <span
           className={cn(
-            "text-[10px] tabular-nums",
-            isDanger
-              ? "text-red-400 font-medium"
+            "text-2xs tabular-nums",
+              isDanger
+              ? "text-red-600 dark:text-red-400 font-medium"
               : isWarn
-                ? "text-amber-300 font-medium"
-                : "text-muted-foreground dark:text-[#8b8b9f]",
+                ? "text-amber-700 dark:text-amber-400 font-medium"
+                : "text-[var(--slate)] dark:text-[var(--muted-ink)]",
           )}
         >
           {length}/{maxLength}
@@ -128,11 +128,13 @@ export function ChatComposerActions({
               size="icon"
               onClick={onStop}
               aria-label="Stop generating"
+              aria-busy={true}
               title="Stop generating"
               className="h-9 w-9 rounded-xl bg-red-500/90 text-white shadow-[0_8px_24px_-6px_rgba(239,68,68,0.55)] hover:bg-red-500"
               data-testid="button-stop-stream"
             >
               <Square className="h-3.5 w-3.5 fill-current" />
+              <span className="sr-only">Generation in progress</span>
             </Button>
           </TooltipTrigger>
           <TooltipContent>Stop generating</TooltipContent>
@@ -144,18 +146,19 @@ export function ChatComposerActions({
               type="button"
               size="icon"
               onClick={onSend}
+              loading={Boolean(disabled && trimmed && !isDanger && !isEnhancing)}
               disabled={!trimmed || isDanger || disabled}
               aria-label="Send message"
               title="Send message"
               className={cn(
-                "h-10 w-10 rounded-xl text-white transition-all sm:h-9 sm:w-9",
+                "h-10 w-10 rounded-xl transition-all sm:h-9 sm:w-9",
                 trimmed && !isDanger
-                  ? "bg-[#d4a03b] text-[#111215] shadow-[0_12px_28px_rgba(212,160,59,0.32)] hover:bg-[#f3c76f]"
-                  : "bg-muted text-muted-foreground hover:bg-muted/80 dark:bg-white/[0.04] dark:text-[#4a4a5e] dark:hover:bg-white/[0.06]",
+                  ? "bg-[var(--brass)] text-[var(--ink)] shadow-[0_12px_28px_rgba(212,160,59,0.32)] hover:bg-[color-mix(in_srgb,var(--brass)_88%,white)]"
+                  : "bg-[var(--surface-muted)] text-[var(--slate)] hover:bg-[var(--surface-muted)]/80 dark:bg-white/[0.04] dark:text-[var(--muted-ink)] dark:hover:bg-white/[0.06]",
               )}
               data-testid="button-send-message"
             >
-              <Send className="h-4 w-4" />
+              {!(disabled && trimmed && !isDanger) ? <Send className="h-4 w-4" /> : null}
             </Button>
           </TooltipTrigger>
           <TooltipContent>Send message</TooltipContent>

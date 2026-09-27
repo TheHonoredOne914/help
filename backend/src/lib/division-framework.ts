@@ -262,9 +262,9 @@ DIPLOMATIC REGISTER ENFORCEMENT:
 - Use bridge language: "While understanding [position], India maintains..."`,
     technical: `
 TECHNICAL REGISTER ENFORCEMENT:
-- Arguments must lead with data, not assertion
-- Every claim must have a specific citation: number, percentage, report name
-- Avoid rhetorical language - prefer analytical precision`,
+- Arguments must lead with data, then immediately interpret what the data proves (mechanism/cause), not assertion alone
+- Every claim must have a specific citation: number, percentage, report name, plus a registry-backed because/driven-by clause when available
+- Avoid rhetorical language - prefer analytical precision; orphan statistics without mechanism analysis fail this register`,
     deliberative: `
 DELIBERATIVE REGISTER ENFORCEMENT:
 - Arguments must present multiple perspectives before advocating a position

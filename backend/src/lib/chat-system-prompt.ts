@@ -24,7 +24,7 @@ function filterSummaryForTopic(summary: string, topicClass: TopicType): string {
   if (!pattern) return summary;
 
   const filtered = lines.filter(line => pattern.test(line));
-  return filtered.length > 0 ? filtered.join("\n") : "";
+  return filtered.length > 0 ? filtered.join("\n") : summary;
 }
 
 export function buildArchiveContextPrompt(topic: string, summary: string): string {

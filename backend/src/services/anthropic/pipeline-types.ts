@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 
 import type { ResearchRunIdentity } from "../../core/pipeline/pipeline-events.js";
 import { embedPipelineMetadata } from "../../core/pipeline/pipeline-metadata.js";
-import { inferResearchMode, type ResearchMode } from "../../core/config/research-mode.js";
+import { inferResearchMode, resolvePublicResearchMode, type ResearchMode } from "../../core/config/research-mode.js";
 import { envelopeRunEvent as buildRunEventEnvelope } from "../../core/streaming/run-stream/index.js";
 
 export interface PipelineMetadata {
@@ -66,7 +66,8 @@ export function isResearchRouteMode(mode: string): boolean {
 
 export function normalizeEffectiveResearchMode(userContent: string, mode: string, selected?: ResearchMode): ResearchMode {
   if (selected) return selected;
-  if (mode === "fast_research" || mode === "deep_research" || mode === "council") return mode;
+  const resolved = resolvePublicResearchMode(mode as ResearchMode | "web_search" | "normal" | "deep_research");
+  if (resolved !== "normal") return resolved;
   return inferResearchMode(userContent, mode === "web_search" ? "web_search" : "deep_research");
 }
 

@@ -73,6 +73,6 @@ export function aggregateSourceUsageValidation(
 function requiredRolePassCount(outputCount: number, policy: SourceUsagePolicy): number {
   if (outputCount === 0) return 0;
   if (policy.strictFailure) return outputCount;
-  if (policy.roleCount >= 4) return Math.min(outputCount, 2);
-  return 1;
+  const ratio = outputCount >= 4 ? 0.75 : 0.67;
+  return Math.min(outputCount, Math.max(1, Math.ceil(outputCount * ratio)));
 }

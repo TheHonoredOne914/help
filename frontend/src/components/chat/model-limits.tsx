@@ -21,8 +21,8 @@ const MODEL_META: Record<TrackedModel, ModelMeta> = {
     label: "Groq (all models)",
     short: "Groq",
     limit: Infinity,
-    color: "text-[#3b6fd4]",
-    bg: "bg-[#3b6fd4]",
+    color: "text-[var(--navy)]",
+    bg: "bg-[var(--navy)]",
   },
 };
 
@@ -85,13 +85,13 @@ export function ModelLimitsPanel() {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-[#6b6b82]">
+        <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-[var(--slate)]">
           <Activity className="h-3 w-3" />
           Daily usage
         </div>
         <button
           onClick={handleReset}
-          className="flex items-center gap-1 text-[10px] text-[#4a4a5e] transition-colors hover:text-[#9a9ab0]"
+          className="flex items-center gap-1 text-2xs text-[var(--slate)] transition-colors hover:text-[var(--muted-ink)]"
           title="Reset usage counter"
           data-testid="reset-usage"
         >
@@ -111,13 +111,13 @@ export function ModelLimitsPanel() {
 
           return (
             <div key={m} className="space-y-1" title={isUnlimited ? `${meta.label} - ${used} requests (unlimited)` : `${meta.label} - ${used}/${meta.limit} requests today`}>
-              <div className="flex items-center justify-between text-[10px]">
+              <div className="flex items-center justify-between text-2xs">
                 <span className={cn("max-w-[140px] truncate font-medium", meta.color)}>{meta.short}</span>
-                <span className={cn("tabular-nums", exhausted ? "text-red-500 font-semibold" : warn ? "text-amber-500" : "text-[#6b6b82]")}>
+                <span className={cn("tabular-nums", exhausted ? "text-red-500 font-semibold" : warn ? "text-amber-500" : "text-[var(--slate)]")}>
                   {isUnlimited ? `${used} / unlimited` : `${used}/${meta.limit}`}
                 </span>
               </div>
-              <div className="h-1 overflow-hidden rounded-full bg-[#1e1e26]">
+              <div className="h-1 overflow-hidden rounded-full bg-[var(--surface-muted)]">
                 <motion.div
                   className={cn("h-full rounded-full", exhausted ? "bg-red-500" : warn ? "bg-amber-500" : meta.bg)}
                   initial={{ width: 0 }}
@@ -130,7 +130,7 @@ export function ModelLimitsPanel() {
         })}
       </div>
 
-      <div className="text-[10px] text-[#4a4a5e]">Unlimited - no daily cap</div>
+      <div className="text-2xs text-[var(--slate)]">Unlimited - no daily cap</div>
     </div>
   );
 }

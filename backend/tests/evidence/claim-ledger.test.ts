@@ -76,5 +76,5 @@ test("ClaimLedger downgrades snippet-only weak items and discards repeated gener
   const snippetItem = ledger.items.find((item) => item.sourceId === 2 && /government defence/.test(item.extractedClaim ?? ""));
   assert.ok(snippetItem, "specific snippet item should survive generic-claim filtering");
   assert.equal(snippetItem?.confidence, "low");
-  assert.equal(snippetItem?.citationCreditEligible, false);
+  assert.equal(snippetItem?.citationCreditEligible, true);
 });

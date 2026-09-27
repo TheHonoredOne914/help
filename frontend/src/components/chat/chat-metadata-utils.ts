@@ -12,14 +12,8 @@ export function sanitizeUrl(url: string): string {
 
 export function stripRawSourceJson(content: string): string {
   return content
-    .replace(/\n*\s*(?:```json\s*)?\{[\s\S]*"sources"\s*:\s*\[[\s\S]*$/i, "")
+    .replace(/\n*(?:```json\s*)?\{\s*"sources"\s*:\s*\[[\s\S]*$/i, "")
     .trimEnd();
 }
 
-export function extractCitedSourceNums(text: string): Set<number> {
-  const nums = new Set<number>();
-  for (const match of text.matchAll(/\[(?:Source\s*)?(\d+)\]/gi)) {
-    nums.add(parseInt(match[1], 10));
-  }
-  return nums;
-}
+export { extractCitedSourceNums, extractCitedIndices } from "@/lib/citation-indices";

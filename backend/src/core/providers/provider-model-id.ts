@@ -7,6 +7,7 @@ export const SUPPORTED_PROVIDER_PREFIXES = [
   "github",
   "cerebras",
   "openai",
+  "opencode",
 ] as const;
 
 export type SupportedProviderPrefix = typeof SUPPORTED_PROVIDER_PREFIXES[number];

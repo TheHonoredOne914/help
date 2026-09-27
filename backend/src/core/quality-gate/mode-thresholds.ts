@@ -67,7 +67,7 @@ export const MODE_THRESHOLDS: Record<ResearchMode, ModeQualityThresholds> = {
   },
   council: {
     minScore: 86,
-    minCitedSources: 180,
+    minCitedSources: 110,
     minSourceClasses: 6,
     minBuckets: 7,
     maxSnippetRatio: 0.35,

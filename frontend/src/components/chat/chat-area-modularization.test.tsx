@@ -24,7 +24,7 @@ test("metadata helpers strip raw source JSON and preserve cited source extractio
 test("stale stream guard remains scoped by run, assistant, and conversation identity", async () => {
   const runController = await readFile(new URL("./use-chat-run-controller.ts", import.meta.url), "utf8");
   const normalizer = await readFile(new URL("./stream-event-normalizer.ts", import.meta.url), "utf8");
-  const guard = await readFile(new URL("./stale-event-guard.ts", import.meta.url), "utf8");
+  const guard = await readFile(new URL("../../lib/run-state/stale-event-guard.ts", import.meta.url), "utf8");
 
   assert.match(runController, /globalStreamRegistry/);
   assert.match(runController, /setActiveRun/);

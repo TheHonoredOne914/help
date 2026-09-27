@@ -1,10 +1,24 @@
 import type { ResearchMode } from "../config/research-mode.js";
 import type { RawSearchResult } from "../retrieval/search-executor.js";
+import { searchModeForBucket } from "../search/search-fallback-policy.js";
 import { searchResultCacheKey } from "./retrieval-cache-key.js";
 import { diagnosticFor, emitRetrievalDiagnostic } from "./retrieval-cache-diagnostics.js";
-import { freshnessForUrl, retrievalSchemaVersion, ttlForFreshness } from "./retrieval-cache-policy.js";
+import {
+  emptySearchNegativeTtlMs,
+  freshnessForSearchResults,
+  retrievalSchemaVersion,
+  ttlForFreshness,
+  type SearchBucketMode,
+} from "./retrieval-cache-policy.js";
 import type { RetrievalCacheEmitter } from "./types.js";
 import { retrievalCacheStore } from "./retrieval-cache-store.js";
+import { RetrievalCacheMetrics } from "./retrieval-cache-metrics.js";
+
+const searchCacheMetrics = new RetrievalCacheMetrics();
+
+export function getSearchCacheMetrics(): RetrievalCacheMetrics {
+  return searchCacheMetrics;
+}
 
 export interface SearchCacheInput {
   provider: string;
@@ -25,15 +39,30 @@ export function getSearchResults(input: SearchCacheInput): RawSearchResult[] | n
     return null;
   }
   const ageMs = Date.now() - new Date(entry.createdAt).getTime();
-  emitRetrievalDiagnostic(input.emit, diagnosticFor("search_result", "hit", key, { provider: input.provider, ageMs }));
+  // ponytail: SWR diagnostic only — no background refresh worker
+  if (freshnessForSearchResults(bucketModeForInput(input)) === "semi_static") {
+    searchCacheMetrics.recordRefreshNeeded("search_result");
+    emitRetrievalDiagnostic(input.emit, diagnosticFor("search_result", "hit", key, {
+      provider: input.provider,
+      ageMs,
+      rejectionReason: "refresh_needed",
+    }));
+  } else {
+    emitRetrievalDiagnostic(input.emit, diagnosticFor("search_result", "hit", key, { provider: input.provider, ageMs }));
+  }
   return entry.value;
 }
 
 export function writeSearchResults(input: SearchCacheInput, results: RawSearchResult[]): void {
   if (!retrievalCacheStore.enabled()) return;
-  if (results.length === 0) return;
   const key = buildSearchKey(input);
-  const freshness = freshestForResults(results);
+  if (results.length === 0) {
+    const ttlMs = emptySearchNegativeTtlMs();
+    const entry = retrievalCacheStore.set("search", key, results, { ttlMs, freshness: "fresh" });
+    if (entry) emitRetrievalDiagnostic(input.emit, diagnosticFor("search_result", "write", key, { provider: input.provider, ttlMs, negativeReason: "empty_results" }));
+    return;
+  }
+  const freshness = freshnessForSearchResults(bucketModeForInput(input));
   const ttlMs = ttlForFreshness(freshness);
   const entry = retrievalCacheStore.set("search", key, results, { ttlMs, freshness });
   if (entry) emitRetrievalDiagnostic(input.emit, diagnosticFor("search_result", "write", key, { provider: input.provider, ttlMs }));
@@ -59,9 +88,6 @@ function buildSearchKey(input: SearchCacheInput): string {
   });
 }
 
-function freshestForResults(results: RawSearchResult[]) {
-  const values = results.map((result) => freshnessForUrl(result.url ?? ""));
-  if (values.includes("fresh")) return "fresh";
-  if (values.includes("semi_static")) return "semi_static";
-  return "static";
+function bucketModeForInput(input: SearchCacheInput): SearchBucketMode {
+  return searchModeForBucket(input.bucket);
 }

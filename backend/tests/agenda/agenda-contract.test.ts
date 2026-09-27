@@ -11,7 +11,7 @@ test("buildAgendaContract locks India democratic-space agenda to Indian Mock Par
   assert.equal(contract.topicType, "indian_democratic_space");
   assert.equal(contract.countryFocus, "India");
   assert.deepEqual(contract.temporalScope, { startYear: 2022, endYear: 2025, explicit: true });
-  assert.equal(contract.outputDepth, "deep_research");
+  assert.equal(contract.outputDepth, "detailed");
   assert.equal(contract.evidenceStandard, "thesis");
   assert.equal(contract.debateMode, "indian_parliamentary");
   assert.equal(contract.minimumUniqueCitedSources, 30);
@@ -41,5 +41,24 @@ test("deepfake election agenda allows directly relevant AI-generated terms", () 
   assert.doesNotMatch(contract.forbiddenDriftTerms.join(" "), /\bAI-generated\b/i);
   assert.doesNotMatch(contract.forbiddenDriftTerms.join(" "), /\bartificial intelligence\b/i);
   assert.doesNotMatch(contract.forbiddenDriftTerms.join(" "), /\bdeepfakes\b/i);
-  assert.match(contract.forbiddenDriftTerms.join(" "), /\bAI governance\b/i);
+  assert.doesNotMatch(contract.forbiddenDriftTerms.join(" "), /\bAI tools\b/i);
+  assert.doesNotMatch(contract.forbiddenDriftTerms.join(" "), /\bAI governance\b/i);
+  assert.doesNotMatch(contract.forbiddenDriftTerms.join(" "), /\balgorithmic bias\b/i);
+  assert.doesNotMatch(contract.forbiddenDriftTerms.join(" "), /\bAI surveillance\b/i);
+
+  const democracyContract = buildAgendaContract({ originalUserQuery: democracyQuery });
+  assert.match(democracyContract.forbiddenDriftTerms.join(" "), /\bAI tools\b/i);
+});
+
+test("deepfake election agenda does not flag AI tools as drift in on-topic prose", () => {
+  const contract = buildAgendaContract({
+    originalUserQuery: "Should the Election Commission regulate AI-generated deepfakes and online political advertising during Indian elections?",
+    outputDepth: "detailed",
+  });
+  const report = assertAgendaLock(
+    "India's Election Commission should require platform transparency and disclosure when AI tools are used in online political advertising during elections.",
+    contract,
+  );
+
+  assert.doesNotMatch(report.detectedDriftTerms.join(" "), /\bAI tools\b/i);
 });

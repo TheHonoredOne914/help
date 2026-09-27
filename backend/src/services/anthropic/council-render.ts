@@ -3,8 +3,12 @@ import type { RawEvidenceSourceInput } from "../../core/evidence/evidence-regist
 import type { BucketedRetrievalResult } from "../../core/retrieval/bucketed-retrieval.js";
 import type { CouncilSession } from "../../core/council/index.js";
 import type { PipelineMetadata } from "./pipeline-types.js";
+import { RESEARCH_LIMITS } from "../../core/config/research-mode.js";
+import { runQualityGate } from "../../core/quality-gate/run-quality-gate.js";
+import { buildAgendaContract } from "../../core/agenda/agenda-contract.js";
+import { buildEvidenceRegistryFromSources } from "../../core/evidence/evidence-registry.js";
 
-export const COUNCIL_REQUIRED_SOURCES = 180;
+export const COUNCIL_REQUIRED_SOURCES = RESEARCH_LIMITS.council.minFinalUniqueCitedSources;
 export const COUNCIL_MIN_FINAL_WORDS = 3000;
 export const COUNCIL_MAX_FINAL_WORDS = 5500;
 
@@ -89,34 +93,39 @@ export function renderCouncilSessionAnswer(session: CouncilSession): string {
 
 export function buildCouncilFinalAnswer(session: CouncilSession, retrieval: BucketedRetrievalResult): string {
   const baseAnswer = renderCouncilSessionAnswer(session);
-  const answerSourceIds = extractCouncilMarkdownSourceIds(baseAnswer);
-  const citedCount = answerSourceIds.size;
-  if (countWords(baseAnswer) >= COUNCIL_MIN_FINAL_WORDS && citedCount >= COUNCIL_REQUIRED_SOURCES) {
-    return trimCouncilAnswerToWordCap(baseAnswer);
-  }
+  return trimCouncilAnswerToWordCap(baseAnswer);
+}
 
-  let bestUnderCap = "";
-  for (const factWordLimit of [18, 14, 12, 8, 5]) {
-    const evidenceSection = buildCouncilEvidenceSection(retrieval, factWordLimit, COUNCIL_REQUIRED_SOURCES);
-    if (!evidenceSection) continue;
-    const candidate = `${baseAnswer.trim()}\n\n${evidenceSection}`;
-    const candidateWords = countWords(candidate);
-    const candidateCitations = extractCouncilMarkdownSourceIds(candidate).size;
-    if (
-      candidateWords >= COUNCIL_MIN_FINAL_WORDS
-      && candidateCitations >= COUNCIL_REQUIRED_SOURCES
-      && candidateWords <= COUNCIL_MAX_FINAL_WORDS
-    ) {
-      return candidate;
-    }
-    if (candidateWords <= COUNCIL_MAX_FINAL_WORDS && candidateWords > countWords(bestUnderCap)) {
-      bestUnderCap = candidate;
-    }
-  }
-
-  if (bestUnderCap) return bestUnderCap;
-  const fallbackSection = buildCouncilEvidenceSection(retrieval, 3, COUNCIL_REQUIRED_SOURCES);
-  return trimCouncilAnswerToWordCap(fallbackSection ? `${baseAnswer.trim()}\n\n${fallbackSection}` : baseAnswer);
+export function runCouncilQualityGate(
+  session: CouncilSession,
+  retrieval: BucketedRetrievalResult,
+  finalAnswer: string,
+  identity: ResearchRunIdentity,
+) {
+  const contract = buildAgendaContract({
+    requestId: identity.requestId,
+    originalUserQuery: session.topic,
+    outputDepth: "detailed",
+  });
+  const registry = buildEvidenceRegistryFromSources(
+    retrieval.enrichedResults.map(councilRetrievalSourceToEvidenceInput),
+    contract,
+  );
+  const citedSourceIds = [...extractCouncilMarkdownSourceIds(finalAnswer)];
+  const citedBucketIds = [...new Set(citedSourceIds.flatMap((id) => registry.getSource(id)?.bucketIds ?? []))];
+  return runQualityGate({
+    finalText: finalAnswer,
+    contract,
+    registry,
+    input: {
+      uniqueCitedSourceIds: citedSourceIds,
+      citedBucketIds,
+      modelRoleOutputs: [],
+      mode: "council",
+      evidenceRegistry: registry,
+      sourceGapReport: retrieval.sourceGapReport,
+    },
+  });
 }
 
 export function buildCouncilEvidenceSection(
@@ -181,6 +190,7 @@ export function buildCouncilMetadata(
   session: CouncilSession,
   retrieval: BucketedRetrievalResult,
   finalAnswer: string,
+  qualityGate?: ReturnType<typeof runCouncilQualityGate>,
 ): PipelineMetadata {
   const citedCouncilSourceIds = extractCouncilMarkdownSourceIds(finalAnswer);
   const finalUniqueCitedSources = citedCouncilSourceIds.size;
@@ -215,6 +225,7 @@ export function buildCouncilMetadata(
           : "Council could not establish enough grounded councillor evidence.",
     },
     sourceGapReport: retrieval.sourceGapReport,
+    qualityGate,
     citationStatus: {
       finalUniqueCitedSources,
       totalLinkedCitations: finalUniqueCitedSources,
@@ -241,4 +252,5 @@ export function buildCouncilMetadata(
 export const __councilTestHooks = {
   buildCouncilFinalAnswer,
   buildCouncilMetadata,
+  runCouncilQualityGate,
 };

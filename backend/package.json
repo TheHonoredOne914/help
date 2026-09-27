@@ -9,6 +9,7 @@
     "start": "node --enable-source-maps ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node run-tests.mjs",
+    "test:integration": "node run-tests.mjs live",
     "smoke:stale-stream": "tsx scripts/smoke-test-stale-stream.ts",
     "smoke:democracy-sources": "tsx scripts/smoke-test-democracy-sources.ts",
     "smoke:core-research": "tsx scripts/smoke-test-core-research.ts",
@@ -34,7 +35,8 @@
     "smoke:extractor-health": "tsx scripts/smoke-test-extractor-health.ts",
     "smoke:search-fallback": "tsx scripts/smoke-test-search-fallback.ts",
     "smoke:extraction-fallback": "tsx scripts/smoke-test-extraction-fallback.ts",
-    "smoke:research-retrieval": "tsx scripts/smoke-test-research-retrieval.ts"
+    "smoke:research-retrieval": "tsx scripts/smoke-test-research-retrieval.ts",
+    "smoke:local-extractor-tier2": "tsx scripts/smoke-test-local-extractor-tier2.ts"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
@@ -75,6 +77,7 @@
   },
   "optionalDependencies": {
     "@upstash/redis": "^1.38.0",
-    "rate-limit-redis": "^5.0.0"
+    "rate-limit-redis": "^5.0.0",
+    "playwright": "^1.55.0"
   }
 }

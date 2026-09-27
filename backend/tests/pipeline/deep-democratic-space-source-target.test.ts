@@ -43,7 +43,7 @@ test("fast and deep source requirements are minimums, not retrieval caps", () =>
   assert.equal(deepContract.minimumUniqueCitedSources, 45);
   assert.equal(getSourceUsagePolicy("fast_research").minimumToProceed, 40);
   assert.equal(getSourceUsagePolicy("deep_research").minimumToProceed, 45);
-  assert.equal(getSourceUsagePolicy("council").minimumToProceed, 180);
+  assert.equal(getSourceUsagePolicy("council").minimumToProceed, 110);
 });
 
 test("mode source targets apply policy floors onto the agenda contract", () => {

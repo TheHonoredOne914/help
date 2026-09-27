@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,6 +9,22 @@ import { FcGoogle } from "react-icons/fc";
 import { Loader2 } from "lucide-react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
+import {
+  evaluatePasswordStrength,
+  passwordStrengthLabel,
+} from "@/lib/password-strength";
+import { cn } from "@/lib/utils";
+
+function explainSignupEmailGap(errorMessage?: string | null): string {
+  const msg = (errorMessage ?? "").toLowerCase();
+  if (msg.includes("not authorized") || msg.includes("email address not authorized")) {
+    return "Supabase default mail only delivers to project team emails. Add custom SMTP (Auth → SMTP) or use a team email.";
+  }
+  if (msg.includes("rate") || msg.includes("over_email_send_rate_limit")) {
+    return "Default Supabase email is capped (~2/hour). Configure custom SMTP for real delivery.";
+  }
+  return "If no email arrives: confirm the address, check spam, and set custom SMTP in Supabase (built-in mail is not for production).";
+}
 
 export default function AuthPage() {
   const [, navigate] = useLocation();
@@ -19,32 +35,47 @@ export default function AuthPage() {
   const [authLoading, setAuthLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [pendingConfirmEmail, setPendingConfirmEmail] = useState<string | null>(null);
+  const [recoveryMode, setRecoveryMode] = useState(() => {
+    if (typeof window === "undefined") return false;
+    const hash = window.location.hash.startsWith("#") ? window.location.hash.slice(1) : window.location.hash;
+    return new URLSearchParams(hash).get("type") === "recovery";
+  });
+  const [newPassword, setNewPassword] = useState("");
+
+  const strength = useMemo(
+    () => evaluatePasswordStrength(recoveryMode ? newPassword : password),
+    [newPassword, password, recoveryMode],
+  );
 
   const authRedirectUrl = () => {
     const appUrl = import.meta.env.VITE_APP_URL || window.location.origin;
     return new URL("/auth", appUrl).toString();
   };
 
-  // Redirect if already logged in
   useEffect(() => {
-    if (!loading && session) {
-      navigate("/");
+    if (!loading && session && !recoveryMode) {
+      navigate("/chat");
     }
-  }, [session, loading, navigate]);
+  }, [session, loading, navigate, recoveryMode]);
+
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "PASSWORD_RECOVERY") setRecoveryMode(true);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
 
   const handleGoogleSignIn = async () => {
     setError(null);
     setAuthLoading(true);
-    // Use explicit app URL if configured, otherwise fall back to current origin.
-    // In production, set VITE_APP_URL to your deployed domain (e.g. https://bestdel.app).
-    // This MUST match the "Site URL" and "Redirect URLs" in your Supabase dashboard,
-    // and the authorized redirect URIs in Google Cloud Console OAuth client.
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: { redirectTo: authRedirectUrl() },
-    });
-    if (error) {
-      setError(error.message);
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: { redirectTo: authRedirectUrl() },
+      });
+      if (error) setError(error.message);
+    } finally {
       setAuthLoading(false);
     }
   };
@@ -54,66 +85,211 @@ export default function AuthPage() {
       setError("Email and password are required.");
       return;
     }
+    if (isSignUp && !strength.ok) {
+      setError(`Password is ${passwordStrengthLabel(strength.level).toLowerCase()}. ${strength.hints[0] ?? "Use a stronger password."}`);
+      return;
+    }
     setError(null);
     setMessage(null);
+    setPendingConfirmEmail(null);
     setAuthLoading(true);
 
-    if (isSignUp) {
-      const { error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          emailRedirectTo: authRedirectUrl(),
-        },
-      });
-      if (error) {
-        setError(error.message);
+    try {
+      if (isSignUp) {
+        const { data, error } = await supabase.auth.signUp({
+          email: email.trim(),
+          password,
+          options: {
+            emailRedirectTo: authRedirectUrl(),
+          },
+        });
+
+        if (error) {
+          setError(`${error.message} ${explainSignupEmailGap(error.message)}`);
+        } else if (data.session) {
+          setMessage("Account created. You're signed in.");
+          navigate("/chat");
+        } else if ((data.user?.identities?.length ?? 0) === 0) {
+          setError("An account with this email may already exist. Sign in, or use Forgot password if you never got a confirmation email.");
+        } else {
+          setPendingConfirmEmail(email.trim());
+          setMessage(
+            `Confirmation email requested for ${email.trim()}. ${explainSignupEmailGap()}`,
+          );
+        }
       } else {
-        setMessage("Check your email to confirm your account.");
+        const { error } = await supabase.auth.signInWithPassword({
+          email: email.trim(),
+          password,
+        });
+        if (error) {
+          setError(error.message);
+        } else {
+          navigate("/chat");
+        }
       }
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleResendConfirmation = async () => {
+    const target = pendingConfirmEmail || email.trim();
+    if (!target) {
+      setError("Enter your email first.");
+      return;
+    }
+    setAuthLoading(true);
+    setError(null);
+    const { error } = await supabase.auth.resend({
+      type: "signup",
+      email: target,
+      options: { emailRedirectTo: authRedirectUrl() },
+    });
+    if (error) {
+      setError(`${error.message} ${explainSignupEmailGap(error.message)}`);
     } else {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) {
-        setError(error.message);
-      } else {
-        navigate("/");
-      }
+      setMessage(`Resent confirmation to ${target}. ${explainSignupEmailGap()}`);
     }
     setAuthLoading(false);
   };
 
+  const handleForgotPassword = async () => {
+    if (!email.trim()) {
+      setError("Enter your email above, then click Forgot password.");
+      return;
+    }
+    setAuthLoading(true);
+    setError(null);
+    setMessage(null);
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+      redirectTo: authRedirectUrl(),
+    });
+    if (error) {
+      setError(`${error.message} ${explainSignupEmailGap(error.message)}`);
+    } else {
+      setMessage(`Password reset requested for ${email.trim()}. ${explainSignupEmailGap()}`);
+    }
+    setAuthLoading(false);
+  };
+
+  const handleUpdatePassword = async () => {
+    if (!strength.ok) {
+      setError(`Password is ${passwordStrengthLabel(strength.level).toLowerCase()}. ${strength.hints[0] ?? "Use a stronger password."}`);
+      return;
+    }
+    setAuthLoading(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      if (error) {
+        setError(error.message);
+        return;
+      }
+      setRecoveryMode(false);
+      setMessage("Password updated.");
+      navigate("/chat");
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      <div className="flex min-h-screen items-center justify-center overflow-y-auto bg-[var(--paper)]">
+        <Loader2 className="h-6 w-6 animate-spin text-[var(--slate)]" />
       </div>
     );
   }
 
+  const strengthBarClass =
+    strength.level === "too_weak"
+      ? "bg-destructive"
+      : strength.level === "weak"
+        ? "bg-amber-500"
+        : strength.level === "fair"
+          ? "bg-[var(--navy)]"
+          : "bg-[var(--status-success)]";
+
   return (
-    <div className="flex min-h-screen items-center justify-center p-4 bg-background">
-      <Card className="w-full max-w-sm">
+    <div className="flex h-full min-h-0 w-full flex-col items-center justify-center gap-8 overflow-y-auto bg-[var(--paper)] p-4">
+      <div className="brand-masthead welcome-greeting">
+        <h1 className="brand-masthead-title">BestDel</h1>
+        <div className="order-paper-rule welcome-rule" aria-hidden />
+        <p className="welcome-hints text-sm text-[var(--slate)]">
+          Indian Mock Parliament research desk
+        </p>
+      </div>
+
+      <Card className="w-full max-w-sm border-[var(--line)] bg-[var(--surface)] shadow-sm">
         <CardHeader className="text-center">
-          <CardTitle className="text-2xl font-semibold tracking-tight">
-            {isSignUp ? "Create account" : "Welcome back"}
+          <CardTitle className="text-xl font-semibold tracking-tight text-[var(--ink)]">
+            {recoveryMode ? "Choose a new password" : isSignUp ? "Create account" : "Sign in"}
           </CardTitle>
           <CardDescription>
-            {isSignUp ? "Sign up to get started" : "Sign in to your account"}
+            {recoveryMode
+              ? "Set a new password for this account."
+              : isSignUp
+              ? "Create an account to save archives and research runs."
+              : "Sign in to continue to your archives."}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* Google OAuth */}
+          {recoveryMode ? (
+            <>
+              <div className="space-y-2">
+                <Label htmlFor="new-password">New password</Label>
+                <Input
+                  id="new-password"
+                  type="password"
+                  placeholder="••••••••"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleUpdatePassword()}
+                  disabled={authLoading}
+                  className="rounded-md"
+                  autoComplete="new-password"
+                />
+                {newPassword.length > 0 && (
+                  <div className="space-y-1.5" aria-live="polite">
+                    <div className="flex items-center justify-between gap-2 text-xs text-[var(--slate)]">
+                      <span>Password strength</span>
+                      <span className="font-medium text-[var(--ink)]">{passwordStrengthLabel(strength.level)}</span>
+                    </div>
+                    <div className="h-1.5 overflow-hidden rounded-full bg-[var(--surface-muted)]">
+                      <div
+                        className={cn("h-full transition-all", strengthBarClass)}
+                        style={{ width: `${(strength.score / 4) * 100}%` }}
+                      />
+                    </div>
+                    {!strength.ok && strength.hints[0] ? (
+                      <p className="text-xs text-[var(--slate)]">{strength.hints[0]}</p>
+                    ) : null}
+                  </div>
+                )}
+              </div>
+              {error && <p className="text-sm text-destructive">{error}</p>}
+              {message && <p className="text-sm text-[var(--status-success)]">{message}</p>}
+              <Button
+                className="w-full"
+                onClick={handleUpdatePassword}
+                loading={authLoading}
+                disabled={authLoading || (newPassword.length > 0 && !strength.ok)}
+              >
+                Update password
+              </Button>
+            </>
+          ) : (
+            <>
           <Button
             variant="outline"
-            className="w-full relative py-6"
+            className="relative w-full"
             onClick={handleGoogleSignIn}
+            loading={authLoading}
             disabled={authLoading}
           >
-            {authLoading ? (
-              <Loader2 className="absolute left-4 h-5 w-5 animate-spin" />
-            ) : (
-              <FcGoogle className="absolute left-4 w-5 h-5" />
-            )}
+            {!authLoading && <FcGoogle className="absolute left-4 h-5 w-5" />}
             <span className="text-sm font-medium">Continue with Google</span>
           </Button>
 
@@ -122,11 +298,10 @@ export default function AuthPage() {
               <Separator />
             </div>
             <div className="relative flex justify-center text-xs uppercase">
-              <span className="bg-card px-2 text-muted-foreground">or</span>
+              <span className="bg-[var(--surface)] px-2 text-[var(--slate)]">or</span>
             </div>
           </div>
 
-          {/* Email + Password */}
           <div className="space-y-2">
             <Label htmlFor="email">Email</Label>
             <Input
@@ -134,9 +309,16 @@ export default function AuthPage() {
               type="email"
               placeholder="you@example.com"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => {
+                const value = e.target.value;
+                setEmail(value);
+                if (pendingConfirmEmail && value.trim() !== pendingConfirmEmail) {
+                  setPendingConfirmEmail(null);
+                }
+              }}
               onKeyDown={(e) => e.key === "Enter" && handleEmailAuth()}
               disabled={authLoading}
+              className="rounded-md"
             />
           </div>
           <div className="space-y-2">
@@ -149,36 +331,83 @@ export default function AuthPage() {
               onChange={(e) => setPassword(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleEmailAuth()}
               disabled={authLoading}
+              className="rounded-md"
+              autoComplete={isSignUp ? "new-password" : "current-password"}
             />
+            {isSignUp && password.length > 0 && (
+              <div className="space-y-1.5" aria-live="polite">
+                <div className="flex items-center justify-between gap-2 text-xs text-[var(--slate)]">
+                  <span>Password strength</span>
+                  <span className="font-medium text-[var(--ink)]">{passwordStrengthLabel(strength.level)}</span>
+                </div>
+                <div className="h-1.5 overflow-hidden rounded-full bg-[var(--surface-muted)]">
+                  <div
+                    className={cn("h-full transition-all", strengthBarClass)}
+                    style={{ width: `${(strength.score / 4) * 100}%` }}
+                  />
+                </div>
+                {!strength.ok && strength.hints[0] ? (
+                  <p className="text-xs text-[var(--slate)]">{strength.hints[0]}</p>
+                ) : null}
+              </div>
+            )}
           </div>
 
-          {error && (
-            <p className="text-sm text-destructive">{error}</p>
-          )}
-          {message && (
-            <p className="text-sm text-green-500">{message}</p>
-          )}
+          {error && <p className="text-sm text-destructive">{error}</p>}
+          {message && <p className="text-sm text-[var(--status-success)]">{message}</p>}
 
           <Button
             className="w-full"
             onClick={handleEmailAuth}
-            disabled={authLoading}
+            loading={authLoading}
+            disabled={authLoading || (isSignUp && password.length > 0 && !strength.ok)}
           >
-            {authLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin mr-2" />
-            ) : null}
             {isSignUp ? "Create account" : "Sign in"}
           </Button>
 
-          <p className="text-center text-sm text-muted-foreground">
+          {!isSignUp && (
+            <p className="text-center">
+              <button
+                type="button"
+                className="text-sm font-medium text-[var(--navy)] underline-offset-4 hover:underline focus-visible:outline-none focus-visible:underline disabled:opacity-50"
+                onClick={handleForgotPassword}
+                disabled={authLoading}
+              >
+                Forgot password?
+              </button>
+            </p>
+          )}
+
+          {isSignUp && pendingConfirmEmail && (
+            <p className="text-center">
+              <button
+                type="button"
+                className="text-sm text-[var(--slate)] underline-offset-4 hover:underline focus-visible:outline-none focus-visible:underline disabled:opacity-50"
+                onClick={handleResendConfirmation}
+                disabled={authLoading}
+              >
+                Resend confirmation email
+              </button>
+            </p>
+          )}
+
+          <p className="text-center text-sm text-[var(--slate)]">
             {isSignUp ? "Already have an account?" : "Don't have an account?"}{" "}
             <button
-              className="text-foreground underline-offset-4 hover:underline font-medium"
-              onClick={() => { setIsSignUp(!isSignUp); setError(null); setMessage(null); }}
+              type="button"
+              className="font-medium text-[var(--navy)] underline-offset-4 hover:underline focus-visible:outline-none focus-visible:underline"
+              onClick={() => {
+                setIsSignUp(!isSignUp);
+                setError(null);
+                setMessage(null);
+                setPendingConfirmEmail(null);
+              }}
             >
               {isSignUp ? "Sign in" : "Sign up"}
             </button>
           </p>
+            </>
+          )}
         </CardContent>
       </Card>
     </div>

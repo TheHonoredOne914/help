@@ -53,6 +53,35 @@ test("bridge omit: agenda-like score 50 does not demote indian_major_media with 
   assert.equal(normalized.citationEligible, true);
 });
 
+test("enrichmentCard topChunks and sourceChunks populate registry topChunks", () => {
+  // Live mucyq378: citationEligibleSources all had topChunks=[] because enrichment
+  // fields were dropped before normalizeEvidenceSourceInput.
+  const body = "The Election Commission directed platforms to label AI-generated political ads and deepfakes within three hours during the Model Code of Conduct period.";
+  const normalized = normalizeEvidenceSourceInput({
+    title: "ECI AI labeling advisory",
+    url: "https://pib.gov.in/eci-ai-label",
+    domain: "pib.gov.in",
+    sourceClass: "official_government",
+    fullText: `${body} ${body}`,
+    snippet: body,
+    extractionQuality: "full",
+    citationEligible: true,
+    enrichmentCard: {
+      topChunks: [body, "PIB circular sets a three-hour takedown window for unlabeled deepfakes."],
+      evidenceItems: [{ claim: body, snippet: body, relevance: "high" }],
+      relevanceScore: 0.9,
+      reducerName: "local",
+    },
+    sourceChunks: [
+      { index: 0, text: body, score: 0.9 },
+      { index: 1, text: "Parliamentary standing committee may examine platform transparency APIs.", score: 0.7 },
+    ],
+  });
+  assert.ok(normalized);
+  assert.ok(normalized.topChunks.length >= 2, `expected topChunks from card/sourceChunks, got ${normalized.topChunks.length}`);
+  assert.match(normalized.topChunks[0]!.text, /Election Commission/);
+});
+
 test("bridge omit: explicit low authorityScore for low_quality stays ineligible", () => {
   const normalized = normalizeEvidenceSourceInput({
     title: "Random blog post",

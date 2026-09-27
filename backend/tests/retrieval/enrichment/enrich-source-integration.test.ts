@@ -29,7 +29,7 @@ test("enrichSource runs extract clean chunk score card validate and cache policy
   assert.doesNotMatch(enriched.fullText, /cookie settings|subscribe|advertisement/i);
   assert.ok(enriched.enrichmentCard);
   assert.ok(enriched.enrichmentCard.topChunks.length > 0);
-  assert.equal(cache.get("enrichment", enrichmentCacheKey(enriched.url, "Supreme Court Article 21 privacy proportionality")), null);
+  assert.ok(cache.get("enrichment", enrichmentCacheKey(enriched.url, "Supreme Court Article 21 privacy proportionality")), "legacy CacheManager should receive cacheEnrichedSource write");
   const cachedExtraction = retrievalCacheManager.getExtraction({ url: enriched.url, provider: "local" });
   assert.ok(cachedExtraction && !("negative" in cachedExtraction));
   assert.equal(cachedExtraction.url, enriched.url);
@@ -52,6 +52,8 @@ test("enrichSource does not cache failed extraction without snippet", async () =
 });
 
 test("enrichSources disables Firecrawl for a run after invalid_key", async () => {
+  const previousMode = process.env.EXTRACTION_API_MODE;
+  process.env.EXTRACTION_API_MODE = "always";
   let firecrawlCalls = 0;
   const fetchFn = (async (url: string | URL | Request) => {
     if (String(url).includes("firecrawl")) {
@@ -62,7 +64,9 @@ test("enrichSources disables Firecrawl for a run after invalid_key", async () =>
   }) as typeof fetch;
 
   const { enrichSources } = await import("../../../src/core/retrieval/enrichment/index.js");
-  const enriched = await enrichSources([
+  let enriched;
+  try {
+  enriched = await enrichSources([
     {
       title: "Privacy source one",
       url: "https://example.com/one",
@@ -85,6 +89,10 @@ test("enrichSources disables Firecrawl for a run after invalid_key", async () =>
   assert.equal(enriched.length, 2);
   assert.equal(enriched[0]?.extractionMethod, "snippet_fallback");
   assert.equal(enriched[1]?.extractionMethod, "snippet_fallback");
+  } finally {
+    if (previousMode === undefined) delete process.env.EXTRACTION_API_MODE;
+    else process.env.EXTRACTION_API_MODE = previousMode;
+  }
 });
 
 test("snippet fallback remains limited and does not become strong citation evidence", async () => {

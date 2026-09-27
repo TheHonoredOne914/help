@@ -58,3 +58,21 @@ test("research run sidebar renders live source counts when metadata exists", () 
   assert.match(html, /PIB brief/);
   assert.match(html, /Completed With Source Gaps/);
 });
+
+test("completed runs with no sources do not stay on Retrieving", () => {
+  const summary = summarizeResearchRunSidebar({
+    runStatus: "completed",
+    selectedResearchMode: "council",
+    corePipelineEvents: [],
+    fullSourceManifest: { totalSources: 0, sources: [] },
+    citationStatus: null,
+    sourceContract: null,
+    sourceGapReport: null,
+    activeArchiveName: "Archive",
+    activeArchiveTopic: "Topic",
+    activeArchiveAngles: [],
+  });
+  const html = renderToStaticMarkup(<ResearchRunSidebar summary={summary} />);
+  assert.doesNotMatch(html, /Retrieving sources/);
+  assert.match(html, /No sources recorded for this run/);
+});

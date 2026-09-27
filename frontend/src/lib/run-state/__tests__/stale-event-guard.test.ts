@@ -1,11 +1,22 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { isStaleRunStateEvent } from "../stale-event-guard";
+import { isStaleRunScopedEvent } from "../stale-event-guard";
 
-test("run-state stale guard rejects wrong run, assistant, or conversation", () => {
-  const active = { runId: "r1", assistantMessageId: 2, conversationId: 1 };
-  assert.equal(isStaleRunStateEvent({ runId: "r2", assistantMessageId: 2, conversationId: 1 }, active), true);
-  assert.equal(isStaleRunStateEvent({ runId: "r1", assistantMessageId: 3, conversationId: 1 }, active), true);
-  assert.equal(isStaleRunStateEvent({ runId: "r1", assistantMessageId: 2, conversationId: 9 }, active), true);
-  assert.equal(isStaleRunStateEvent({ runId: "r1", assistantMessageId: 2, conversationId: 1 }, active), false);
+const active = { runId: "run-a", assistantMessageId: "msg-a", conversationId: 10 };
+
+test("runId must match active run", () => {
+  assert.equal(isStaleRunScopedEvent({ runId: "run-b" }, active), true);
+  assert.equal(isStaleRunScopedEvent({ runId: "run-a" }, active), false);
+});
+
+test("assistantMessageId must match when both are present", () => {
+  assert.equal(isStaleRunScopedEvent({ runId: "run-a", assistantMessageId: "msg-b" }, active), true);
+  assert.equal(isStaleRunScopedEvent({ runId: "run-a", assistantMessageId: "msg-a" }, active), false);
+  assert.equal(isStaleRunScopedEvent({ runId: "run-a" }, active), false);
+});
+
+test("conversationId must match when both are present", () => {
+  assert.equal(isStaleRunScopedEvent({ runId: "run-a", conversationId: 11 }, active), true);
+  assert.equal(isStaleRunScopedEvent({ runId: "run-a", conversationId: 10 }, active), false);
+  assert.equal(isStaleRunScopedEvent({ runId: "run-a" }, { ...active, conversationId: null }), false);
 });

@@ -51,14 +51,60 @@ function usageItemFromCard(card: EvidenceCard, roleName: string): SourceUsageMap
       confidence: "low",
     });
   }
-  if (/data|stat/i.test(roleName) && substantiveNumber) {
+  // Role-faithful deterministic types (must match role-specific instructions).
+  if (/retrieval_critic|final_quality/i.test(roleName)) {
     return baseCardItem(card, {
-      usageType: "number_extracted",
-      extractedNumber: substantiveNumber,
-      extractedClaim: numberClaim,
-      supportedSection: numberClaim ? undefined : "data_statistics",
+      usageType: "used_for_reliability_matrix",
+      extractedClaim: fact,
+      limitation: limitation ?? "Deterministic source-reliability assessment.",
+      supportedSection: "source_gap_report",
+      confidence,
+    });
+  }
+  if (/citation_auditor/i.test(roleName)) {
+    return baseCardItem(card, {
+      usageType: "used_for_citation_audit",
+      extractedClaim: fact,
+      limitation: limitation ?? "Deterministic citation-safety audit.",
+      supportedSection: "evidence_verification",
+      confidence,
+    });
+  }
+  if (/thesis/i.test(roleName) && fact) {
+    return baseCardItem(card, {
+      usageType: "supports_claim",
+      extractedClaim: fact,
+      supportedSection: "strategic_insights",
       limitation: card.limitations[0],
       confidence,
+    });
+  }
+  if (/data|stat/i.test(roleName)) {
+    const percentFromFact = fact?.match(/\b\d+(?:\.\d+)?%/);
+    const num = substantiveNumber ?? percentFromFact?.[0];
+    if (num) {
+      return baseCardItem(card, {
+        usageType: "number_extracted",
+        extractedNumber: num,
+        extractedClaim: (substantiveNumber ? numberClaim : fact) ?? num,
+        supportedSection: "data_statistics",
+        limitation: card.limitations[0],
+        confidence,
+      });
+    }
+    if (fact) {
+      return baseCardItem(card, {
+        usageType: "fact_extracted",
+        extractedClaim: fact,
+        supportedSection: "data_statistics",
+        limitation: card.limitations[0],
+        confidence,
+      });
+    }
+    return baseCardItem(card, {
+      usageType: "relevant_but_weak",
+      limitation: limitation ?? "No substantive statistic available for data_analyst.",
+      confidence: "low",
     });
   }
   if (/legal/i.test(roleName) && legalHolding && ["court_primary", "legal_commentary"].includes(card.sourceClass)) {
@@ -67,6 +113,15 @@ function usageItemFromCard(card: EvidenceCard, roleName: string): SourceUsageMap
       legalHolding,
       limitation: card.limitations[0],
       supportedSection: "legal_analysis",
+      confidence,
+    });
+  }
+  if (/parliamentary|strategist/i.test(roleName) && fact) {
+    return baseCardItem(card, {
+      usageType: "used_for_debate_utility",
+      extractedClaim: fact,
+      supportedSection: "debate_utility",
+      limitation: card.limitations[0],
       confidence,
     });
   }
@@ -85,15 +140,6 @@ function usageItemFromCard(card: EvidenceCard, roleName: string): SourceUsageMap
       usageType: "legal_holding_extracted",
       legalHolding,
       supportedSection: "legal_analysis",
-      limitation: card.limitations[0],
-      confidence,
-    });
-  }
-  if (/parliamentary|strategist/i.test(roleName) && fact) {
-    return baseCardItem(card, {
-      usageType: "used_for_debate_utility",
-      extractedClaim: fact,
-      supportedSection: "debate_utility",
       limitation: card.limitations[0],
       confidence,
     });
@@ -172,6 +218,10 @@ function firstMeaningful(values: Array<string | null | undefined>): string | und
 function isBadEvidenceText(text: string): boolean {
   if (/you need to enable javascript to run this app/i.test(text)) return true;
   if (/endstream endobj|xref\s+\d+|%ï¿½|ï¿½{2,}/i.test(text)) return true;
+  if (/LOK SABHA|RAJYA SABHA|UNSTARRED QUESTION|STARRED QUESTION|Will the Minister of|TO BE ANSWERED ON/i.test(text)) return true;
+  if (/IN THE SUPREME COURT OF INDIA|WRIT PETITION|CIVIL (?:APPELLATE|ORIGINAL) JURISDICTION|REPORTABLE|NON-REPORTABLE/i.test(text)) return true;
+  if (/External link confirmation|img Essay Series|\bA2A\b|json LICENSE|Browse by Topics|STATES CITIES SPORTS/i.test(text)) return true;
+  if (/GOVERNMENT OF INDIA MINISTRY OF/i.test(text) && text.length > 80) return true;
   const replacementCount = (text.match(/ï¿½/g) ?? []).length;
   return replacementCount >= 3 || replacementCount / Math.max(1, text.length) > 0.02;
 }
@@ -199,6 +249,8 @@ function qualityLimitation(card: EvidenceCard): string {
   if (card.extractionQuality === "failed") return "Extraction failed; do not count as proof.";
   if (card.extractionQuality === "snippet") return "Snippet-only source; use as context unless corroborated.";
   if (card.limitedSource) return "Limited source; use cautiously and qualify.";
-  if (card.citationStrength === "weak") return "Weak citation strength; use as contextual material.";
-  return "Only weak or title-level background text was available.";
+  if (card.citationStrength === "weak" || card.citationStrength === "ineligible") return "Weak citation strength; use as contextual material.";
+  const fact = firstMeaningful(evidenceTexts(card));
+  if (!fact || fact.length < 40 || isBadEvidenceText(fact)) return "Only weak or title-level background text was available.";
+  return "Extracted text is usable; do not extend claims past the card.";
 }

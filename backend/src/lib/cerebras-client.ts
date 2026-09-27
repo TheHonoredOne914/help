@@ -1,12 +1,10 @@
 import OpenAI from "openai";
+import { CEREBRAS_CATALOG } from "../core/providers/catalog/index.js";
 import { multiKeyFetch } from "./multi-key-fetch.js";
 
 export const CEREBRAS_BASE_URL = "https://api.cerebras.ai/v1";
 
-export const CEREBRAS_CATALOG = [
-  { id: "llama3.1-8b", name: "Llama 3.1 8B", badge: "fast", contextWindow: 8192 },
-  { id: "llama3.3-70b", name: "Llama 3.3 70B", badge: "flagship", contextWindow: 8192 },
-];
+export { CEREBRAS_CATALOG };
 
 export function isCerebrasEnabled(overrideKey?: string | null): boolean {
   return Boolean(overrideKey?.trim() || process.env.CEREBRAS_API_KEY);

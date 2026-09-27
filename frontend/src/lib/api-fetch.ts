@@ -1,5 +1,5 @@
 import { getProviderHeaders } from "@/lib/provider-keys";
-import { supabase } from "@/lib/supabase";
+import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 
 const MAX_RETRIES = 2;
 const RETRY_DELAY_BASE_MS = 1000;
@@ -17,10 +17,18 @@ export async function apiFetch(
   init: RequestInit = {},
   retries = MAX_RETRIES
 ): Promise<Response> {
-  // Get Supabase JWT for backend auth
-  const { data: { session } } = await supabase.auth.getSession();
-  const authHeader: Record<string, string> = session?.access_token
-    ? { "Authorization": `Bearer ${session.access_token}` }
+  // Get Supabase JWT for backend auth. A session lookup failure must not block the request.
+  let accessToken: string | undefined;
+  if (isSupabaseConfigured) {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      accessToken = session?.access_token;
+    } catch {
+      accessToken = undefined;
+    }
+  }
+  const authHeader: Record<string, string> = accessToken
+    ? { "Authorization": `Bearer ${accessToken}` }
     : {};
 
   const existing =

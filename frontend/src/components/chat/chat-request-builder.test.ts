@@ -16,6 +16,9 @@ test("rhetorics request preserves the exact rhetorics body shape", () => {
     mode: "rhetorics",
     rhetoricsType: "speech",
     creativity: 0.7,
+    normalModel: "groq/llama",
+    autoFallback: false,
+    systemPrompt: "ignored",
   });
 });
 

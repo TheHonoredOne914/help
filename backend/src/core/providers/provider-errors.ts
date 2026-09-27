@@ -118,6 +118,8 @@ function sanitizedOriginal(message: string): string {
     .replace(/https?:\/\/\S+/gi, "[REDACTED_URL]")
     .replace(/\borg_[A-Za-z0-9_-]+/g, "[REDACTED_ORG]")
     .replace(/\bbilling\b/gi, "[REDACTED_BILLING]");
-  const withoutRawJson = redacted.replace(/\{[\s\S]*\}/g, "[REDACTED_PROVIDER_BODY]");
+  const withoutRawJson = redacted
+    .replace(/\{[\s\S]*\}/g, "[REDACTED_PROVIDER_BODY]")
+    .replace(/\{[\s\S]*$/g, "[REDACTED_PROVIDER_BODY]");
   return withoutRawJson.length > 180 ? `${withoutRawJson.slice(0, 177)}...` : withoutRawJson;
 }

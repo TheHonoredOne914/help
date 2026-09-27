@@ -16,10 +16,10 @@ test("query wording infers fast and deep modes", () => {
 test("mode limits scale source and repair targets", () => {
   assert.equal(RESEARCH_LIMITS.fast_research.minCitationEligibleSources, 40);
   assert.equal(RESEARCH_LIMITS.fast_research.minFinalUniqueCitedSources, 40);
-  assert.equal(RESEARCH_LIMITS.fast_research.maxSourcesToEnrich, 60);
+  assert.equal(RESEARCH_LIMITS.fast_research.maxSourcesToEnrich, 90);
   assert.equal(RESEARCH_LIMITS.fast_research.maxRawResults, 120);
   assert.equal(RESEARCH_LIMITS.fast_research.maxTotalQueries, 36);
-  assert.equal(RESEARCH_LIMITS.fast_research.enrichmentBudgetMs, 72_000);
+  assert.equal(RESEARCH_LIMITS.fast_research.enrichmentBudgetMs, 96_000);
   assert.equal(RESEARCH_LIMITS.fast_research.maxRepairPasses, 2);
   assert.equal(RESEARCH_LIMITS.deep_research.minCitationEligibleSources, 45);
   assert.equal(RESEARCH_LIMITS.council.minCitationEligibleSources, 110);

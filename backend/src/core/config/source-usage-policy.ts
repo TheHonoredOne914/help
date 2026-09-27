@@ -1,4 +1,5 @@
 import type { ResearchMode } from "./research-mode.js";
+import type { ResearchRole } from "../providers/model-strategy.js";
 
 export type SourceUsagePolicyMode = ResearchMode | "web_search";
 
@@ -36,14 +37,47 @@ export function getSourceUsagePolicy(mode: SourceUsagePolicyMode): SourceUsagePo
         roleCount: 3,
       };
     case "council":
+      // Align with RESEARCH_LIMITS.council (110): citing 180 unique sources inside
+      // the 3000–5500 word band is unreachable even with healthy retrieval (~167 eligible).
+      // Union floor is the contract; roles are coverage workers, not each a full-floor gate.
       return {
-        requiredSources: 180,
+        requiredSources: 110,
         perRoleMinimum: 30,
-        minimumToProceed: 180,
-        strictFailure: true,
-        allowCompletedWithSourceGaps: false,
-        allowDeterministicExtractionFallback: false,
+        minimumToProceed: 110,
+        strictFailure: false,
+        allowCompletedWithSourceGaps: true,
+        allowDeterministicExtractionFallback: true,
         roleCount: 6,
       };
+  }
+}
+
+/** Curated role slate per mode — not a blind slice of SOURCE_USAGE_RESEARCH_ROLES. */
+export function getSourceUsageRolesForMode(mode: SourceUsagePolicyMode): ResearchRole[] {
+  switch (mode) {
+    case "web_search":
+    case "fast_research":
+      // Include data_analyst + strategist so mechanism/debate roles actually run.
+      return [
+        "retrieval_critic",
+        "evidence_extractor",
+        "data_analyst",
+        "indian_parliamentary_strategist",
+      ];
+    case "deep_research":
+      return [
+        "evidence_extractor",
+        "data_analyst",
+        "legal_analyst",
+      ];
+    case "council":
+      return [
+        "retrieval_critic",
+        "evidence_extractor",
+        "data_analyst",
+        "legal_analyst",
+        "indian_parliamentary_strategist",
+        "citation_auditor",
+      ];
   }
 }

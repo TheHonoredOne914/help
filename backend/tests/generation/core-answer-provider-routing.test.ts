@@ -1,5 +1,6 @@
 import test from "node:test";
-import { buildSourceUsageMapFromRegistry } from "../../src/core/evidence/source-usage-map.js";
+import { RESEARCH_LIMITS } from "../../src/core/config/research-mode.js";
+import { buildModeSourceUsageMap } from "../helpers/source-usage-fixtures.js";
 import assert from "node:assert/strict";
 import fixtureSources from "../fixtures/india-democracy-sources.json" with { type: "json" };
 import { buildAgendaContract } from "../../src/core/agenda/agenda-contract.js";
@@ -19,7 +20,8 @@ function setup() {
 
 async function run(providerName: "nvidia" | "github", model: string) {
   const { agendaContract, evidenceRegistry, evidencePacks, claimGraph } = setup();
-  const ids = evidenceRegistry.getCitationEligibleSources().slice(0, 30).map((source) => source.id);
+  const mode = providerName === "github" ? "fast_research" : "deep_research";
+  const ids = evidenceRegistry.getCitationEligibleSources().slice(0, RESEARCH_LIMITS[mode].minFinalUniqueCitedSources).map((source) => source.id);
   const citations = ids.map((id) => evidenceRegistry.getCitationMarkdown(id)).join(" ");
   let seenProvider = "";
   let seenModel = "";
@@ -38,12 +40,12 @@ async function run(providerName: "nvidia" | "github", model: string) {
   await generateCoreResearchAnswer({
     requestId: `${providerName}-generation`,
     userQuery: agendaContract.originalUserQuery,
-    mode: providerName === "github" ? "fast_research" : "deep_research",
+    mode,
     agendaContract,
     evidenceRegistry,
     evidencePacks,
     claimGraph,
-    sourceUsageMaps: [buildSourceUsageMapFromRegistry("evidence_extractor", evidenceRegistry, agendaContract, providerName === "github" ? 8 : 30)],
+    sourceUsageMaps: [buildModeSourceUsageMap(mode, "evidence_extractor", evidenceRegistry, agendaContract)],
     allowSyntheticSourceUsage: true,
     generationMode: "model",
     providerRouter,
@@ -57,5 +59,5 @@ async function run(providerName: "nvidia" | "github", model: string) {
   assert.equal(seenModel, model);
 }
 
-test("core answer generation routes NVIDIA model-backed generation", () => run("nvidia", "moonshotai/kimi-k2.6"));
+test("core answer generation routes NVIDIA model-backed generation", () => run("nvidia", "nvidia/llama-3.3-nemotron-super-49b-v1"));
 test("core answer generation routes GitHub model-backed generation", () => run("github", "openai/gpt-4.1"));

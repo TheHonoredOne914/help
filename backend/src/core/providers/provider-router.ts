@@ -88,17 +88,27 @@ export class ProviderRouter {
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, provider: string, onTimeout?: () => void): Promise<T> {
   let timeout: NodeJS.Timeout | null = null;
+  let settled = false;
+  const guarded = promise.then(
+    (value) => value,
+    (error: unknown) => {
+      if (settled) return new Promise<T>(() => {});
+      throw error;
+    },
+  );
   try {
     return await Promise.race([
-      promise,
+      guarded,
       new Promise<T>((_, reject) => {
         timeout = setTimeout(() => {
+          settled = true;
           onTimeout?.();
           reject(new Error(`${provider} provider timeout after ${timeoutMs}ms`));
         }, timeoutMs);
       }),
     ]);
   } finally {
+    settled = true;
     if (timeout) clearTimeout(timeout);
   }
 }

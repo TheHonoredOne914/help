@@ -3,7 +3,7 @@ import type { SourceBucketId } from "../../retrieval/source-buckets.js";
 import type { EvidenceRegistryCore } from "../evidence-registry.js";
 import { applyDomainDiversity } from "./domain-diversity.js";
 import { toEvidenceCard } from "./evidence-card-adapter.js";
-import { namedPackLimit } from "./pack-budget.js";
+import { namedPackLimit, trimCardsToTokenBudget } from "./pack-budget.js";
 import { rankEvidenceCards } from "./pack-ranking.js";
 import type { EvidenceCard, EvidencePack, EvidencePackBuildOptions } from "./types.js";
 
@@ -15,7 +15,7 @@ export function buildEvidencePacks(registry: EvidenceRegistryCore, contract: Age
   const limit = namedPackLimit(mode, options.maxCardsPerPack);
   const make = (id: string, buckets: SourceBucketId[], fallback = false): EvidencePack => {
     const candidates = cards.filter((card) => card.bucketIds.some((bucketId) => buckets.includes(bucketId)));
-    const selected = selectCards(candidates.length || !fallback ? candidates : cards, query, limit);
+    const selected = trimCardsToTokenBudget(selectCards(candidates.length || !fallback ? candidates : cards, query, limit), mode);
     return {
       id,
       cards: selected,
@@ -34,7 +34,7 @@ export function buildEvidencePacks(registry: EvidenceRegistryCore, contract: Age
     academicAnalysisPack: make("academicAnalysisPack", ["academic_research", "policy_research"]),
     pressFreedomPack: make("pressFreedomPack", ["press_freedom", "indian_major_media"]),
     debateUtilityPack: make("debateUtilityPack", ["indian_major_media", "parliamentary_records", "policy_research", "court_legal"], true),
-    strategicSynthesisPack: buildStrategicSynthesisPack(cards, query, limit, required, registry, contract),
+    strategicSynthesisPack: buildStrategicSynthesisPack(cards, query, limit, required, registry, contract, mode),
   };
 }
 
@@ -45,13 +45,14 @@ function buildStrategicSynthesisPack(
   requiredBuckets: SourceBucketId[],
   registry: EvidenceRegistryCore,
   contract: AgendaContract,
+  mode?: EvidencePackBuildOptions["mode"],
 ): EvidencePack {
   const strong = cards.filter((card) => card.citationStrength === "strong" || card.citationStrength === "medium");
   const limited = cards.filter((card) => card.limitedSource || card.limitations.length > 0);
   const requiredRepresentatives = requiredBuckets
     .map((bucketId) => rankEvidenceCards(cards.filter((card) => card.bucketIds.includes(bucketId)), { query })[0])
     .filter((card): card is EvidenceCard => Boolean(card));
-  const selected = selectCards([...requiredRepresentatives, ...strong, ...limited], query, limit);
+  const selected = trimCardsToTokenBudget(selectCards([...requiredRepresentatives, ...strong, ...limited], query, limit), mode);
   return {
     id: "strategicSynthesisPack",
     cards: selected,

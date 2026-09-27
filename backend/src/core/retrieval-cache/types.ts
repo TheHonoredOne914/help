@@ -26,6 +26,8 @@ export interface RetrievalCacheDiagnostic {
   ttlMs?: number;
   ageMs?: number;
   rejectionReason?: string;
+  /** Policy reason string for negative writes/hits (aliases rejectionReason). */
+  negativeReason?: string;
   url?: string;
   extractionQuality?: "full" | "partial" | "snippet_fallback" | "failed" | "high" | "medium" | "low";
   contentHash?: string;
@@ -40,6 +42,7 @@ export interface RetrievalCacheSummary {
   writes: number;
   invalidations: number;
   staleSkips: number;
+  schemaMismatches?: number;
 }
 
 export interface RetrievalCacheValue<T> {

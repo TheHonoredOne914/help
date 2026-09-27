@@ -20,6 +20,28 @@ export function wordCount(text: string): number {
   return (text.trim().match(/\b[\w'-]+\b/g) ?? []).length;
 }
 
+/**
+ * User-visible prose word count for final-answer length (QG, repair, smoke).
+ * Strip rules:
+ *   - markdown links / images → keep link/alt text only
+ *   - bare http(s) and www URLs → removed
+ *   - remaining tokens are word-ish runs (letters/digits/'/-)
+ */
+export function countProseWords(text: string): number {
+  const prose = text
+    .replace(/!\[([^\]]*)\]\((https?:\/\/[^)]+|www\.[^)]+)\)/gi, "$1")
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+|www\.[^)]+)\)/gi, "$1")
+    .replace(/https?:\/\/\S+/gi, " ")
+    .replace(/\bwww\.\S+/gi, " ")
+    .replace(/[^\w'-]+/g, " ");
+  return prose.trim() ? prose.trim().split(/\s+/).filter(Boolean).length : 0;
+}
+
+/** Alias kept for existing call sites; same as countProseWords. */
+export function contentWordCount(text: string): number {
+  return countProseWords(text);
+}
+
 export function extractCitationIds(text: string): number[] {
   return [...text.matchAll(/\[Source\s+(\d+)\]\(https?:\/\/[^)]+\)/gi)].map((match) => Number(match[1]));
 }

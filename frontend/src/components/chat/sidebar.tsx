@@ -10,7 +10,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import {
   ArchiveIcon,
-  Bot,
+  Scale,
   MessageSquare,
   Moon,
   PanelLeftClose,
@@ -28,8 +28,9 @@ import { useDarkMode } from "@/hooks/use-dark-mode";
 import { SettingsDialog } from "./settings-dialog";
 import { ModelLimitsPanel } from "./model-limits";
 import { apiFetch } from "@/lib/api-fetch";
-import { motion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { toast } from "@/hooks/use-toast";
 
 const conversationDateFormatter = new Intl.DateTimeFormat("en-US", {
   month: "short",
@@ -38,7 +39,15 @@ const conversationDateFormatter = new Intl.DateTimeFormat("en-US", {
 });
 
 function formatConversationDate(date: Date): string {
-  return conversationDateFormatter.format(date);
+  if (Number.isNaN(date.getTime())) return "Created";
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfYesterday = new Date(startOfToday);
+  startOfYesterday.setDate(startOfYesterday.getDate() - 1);
+  const time = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(date);
+  if (date >= startOfToday) return `Created today, ${time}`;
+  if (date >= startOfYesterday) return `Created yesterday, ${time}`;
+  return `Created ${conversationDateFormatter.format(date)}`;
 }
 
 interface SidebarProps {
@@ -56,7 +65,7 @@ interface ConversationRowProps {
   isActive: boolean;
   onSelect: () => void;
   onDelete: () => void;
-  onRename: (newTitle: string) => void;
+  onRename: (newTitle: string) => boolean | void | Promise<boolean | void>;
 }
 
 interface ArchiveCardProps {
@@ -83,6 +92,7 @@ function ConversationRow({ conv, isActive, onSelect, onDelete, onRename }: Conve
   const [swipeOffset, setSwipeOffset] = useState(0);
   const [revealed, setRevealed] = useState(false);
   const touchStartX = useRef<number | null>(null);
+  const ignoreClickRef = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -92,11 +102,15 @@ function ConversationRow({ conv, isActive, onSelect, onDelete, onRename }: Conve
     }
   }, [isEditing]);
 
-  const commit = () => {
+  const commit = async () => {
     const trimmed = draftTitle.trim();
     setIsEditing(false);
-    if (trimmed && trimmed !== conv.title) onRename(trimmed);
-    else setDraftTitle(conv.title);
+    if (trimmed && trimmed !== conv.title) {
+      const ok = await onRename(trimmed);
+      if (ok === false) setDraftTitle(conv.title);
+      return;
+    }
+    setDraftTitle(conv.title);
   };
 
   const handleTouchStart = (e: React.TouchEvent) => {
@@ -115,6 +129,7 @@ function ConversationRow({ conv, isActive, onSelect, onDelete, onRename }: Conve
     if (swipeOffset > 40) {
       setSwipeOffset(80);
       setRevealed(true);
+      ignoreClickRef.current = true;
       return;
     }
     setSwipeOffset(0);
@@ -122,7 +137,7 @@ function ConversationRow({ conv, isActive, onSelect, onDelete, onRename }: Conve
   };
 
   return (
-    <div className="relative overflow-hidden rounded-2xl sidebar-item-in">
+    <div className="relative overflow-hidden rounded-lg sidebar-item-in">
       <div
         className={cn(
           "absolute inset-y-0 left-0 flex items-center justify-start pl-3 bg-destructive/10 md:hidden transition-opacity",
@@ -135,7 +150,7 @@ function ConversationRow({ conv, isActive, onSelect, onDelete, onRename }: Conve
             e.stopPropagation();
             onDelete();
           }}
-          className="rounded-xl p-2 text-destructive hover:bg-destructive/20"
+          className="rounded-md p-2 text-destructive hover:bg-destructive/20"
           aria-label="Delete conversation"
         >
           <Trash2 className="h-4 w-4" />
@@ -144,16 +159,25 @@ function ConversationRow({ conv, isActive, onSelect, onDelete, onRename }: Conve
 
       <div
         onClick={() => {
+          if (ignoreClickRef.current) {
+            ignoreClickRef.current = false;
+            return;
+          }
+          if (revealed || swipeOffset > 0) {
+            setSwipeOffset(0);
+            setRevealed(false);
+            return;
+          }
           if (!isEditing) onSelect();
         }}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
         className={cn(
-          "group relative flex items-center justify-between rounded-2xl border px-3 py-3 transition-all",
+          "group relative flex items-center justify-between rounded-lg border px-3 py-3 transition-all",
           isActive
-            ? "border-[#3b6fd430] bg-[#3b6fd414] text-sidebar-foreground shadow-sm"
-            : "border-[#10182814] bg-white/55 text-sidebar-foreground hover:border-[#3b6fd430] hover:bg-sidebar-accent/70 dark:border-sidebar-border/50 dark:bg-sidebar/70",
+            ? "border-[color-mix(in_srgb,var(--navy)_19%,transparent)] bg-[color-mix(in_srgb,var(--navy)_8%,transparent)] text-sidebar-foreground shadow-sm"
+            : "border-[var(--line)] bg-white/55 text-sidebar-foreground hover:border-[color-mix(in_srgb,var(--navy)_19%,transparent)] hover:bg-sidebar-accent/70 dark:border-sidebar-border/50 dark:bg-sidebar/70",
         )}
         style={{
           transform: `translateX(${swipeOffset}px)`,
@@ -164,17 +188,17 @@ function ConversationRow({ conv, isActive, onSelect, onDelete, onRename }: Conve
         <div
           className={cn(
             "absolute left-0 top-3 bottom-3 w-1 rounded-r-full transition-opacity",
-            isActive ? "bg-[#3b6fd4] opacity-100" : "bg-transparent opacity-0",
+            isActive ? "bg-[var(--navy)] opacity-100" : "bg-transparent opacity-0",
           )}
           aria-hidden
         />
         <div className="flex min-w-0 flex-1 items-center gap-3 pl-1">
           <div
             className={cn(
-              "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border",
+              "flex h-9 w-9 shrink-0 items-center justify-center rounded-md border",
               isActive
-                ? "border-[#3b6fd430] bg-[#3b6fd418] text-[#244a7b] dark:border-white/18 dark:bg-white/10 dark:text-white"
-                : "border-[#10182814] bg-white/60 text-muted-foreground dark:border-sidebar-border/60 dark:bg-background/60",
+                ? "border-[color-mix(in_srgb,var(--navy)_19%,transparent)] bg-[color-mix(in_srgb,var(--navy)_10%,transparent)] text-[var(--navy)] dark:border-white/18 dark:bg-white/10 dark:text-white"
+                : "border-[var(--line)] bg-white/60 text-[var(--slate)] dark:border-sidebar-border/60 dark:bg-[var(--surface)]/60",
             )}
           >
             <MessageSquare className="h-4 w-4" />
@@ -196,7 +220,7 @@ function ConversationRow({ conv, isActive, onSelect, onDelete, onRename }: Conve
                   }
                 }}
                 onClick={(e) => e.stopPropagation()}
-                className="w-full rounded-md border border-border bg-background px-1.5 py-0.5 text-sm font-medium outline-none focus:ring-1 focus:ring-primary/40"
+                className="w-full rounded-md border border-[var(--line)] bg-[var(--paper)] px-1.5 py-0.5 text-sm font-medium outline-none focus:ring-1 focus:ring-primary/40"
                 data-testid={`input-rename-conversation-${conv.id}`}
               />
             ) : (
@@ -212,7 +236,7 @@ function ConversationRow({ conv, isActive, onSelect, onDelete, onRename }: Conve
                 {conv.title}
               </span>
             )}
-            <span className={cn("truncate text-[11px]", isActive ? "text-white/68" : "text-muted-foreground")}>
+            <span className="truncate text-xs text-[var(--slate)]">
               {formatConversationDate(new Date(conv.createdAt))}
             </span>
           </div>
@@ -220,7 +244,7 @@ function ConversationRow({ conv, isActive, onSelect, onDelete, onRename }: Conve
         <Button
           variant="ghost"
           size="icon"
-          className="sidebar-delete-btn hidden h-8 w-8 shrink-0 rounded-xl text-muted-foreground hover:bg-destructive/10 hover:text-destructive md:inline-flex"
+          className="sidebar-delete-btn hidden h-8 w-8 shrink-0 rounded-md text-[var(--slate)] hover:bg-destructive/10 hover:text-destructive md:inline-flex"
           onClick={(e) => {
             e.stopPropagation();
             onDelete();
@@ -236,25 +260,19 @@ function ConversationRow({ conv, isActive, onSelect, onDelete, onRename }: Conve
 }
 
 function ArchiveCard({ archive, isActive, onSelect }: ArchiveCardProps) {
-  return (
-    <motion.button
-      type="button"
-      onClick={onSelect}
-      whileHover={{ x: 2 }}
-      whileTap={{ scale: 0.98 }}
-      transition={{ duration: 0.15 }}
-      className={cn(
-        "group relative w-full rounded-xl border px-3 py-3 text-left transition-all",
-        isActive
-          ? "border-[#3b6fd430] bg-[#3b6fd414] text-sidebar-foreground shadow-sm dark:bg-[#1a1c22] dark:text-[#eeeef5]"
-          : "border-transparent bg-transparent text-muted-foreground hover:border-[#10182814] hover:bg-white/55 hover:text-foreground dark:hover:bg-[#111215]",
-      )}
-      data-testid={`button-archive-${archive.id}`}
-    >
+  const reduce = useReducedMotion();
+  const className = cn(
+    "group relative w-full rounded-md border px-3 py-3 text-left transition-all",
+    isActive
+      ? "border-[color-mix(in_srgb,var(--navy)_19%,transparent)] bg-[color-mix(in_srgb,var(--navy)_8%,transparent)] text-sidebar-foreground shadow-sm dark:bg-[var(--surface-muted)] dark:text-[var(--ink)]"
+      : "border-transparent bg-transparent text-[var(--slate)] hover:border-[var(--line)] hover:bg-[var(--surface)]/55 hover:text-[var(--ink)] dark:hover:bg-[var(--surface-muted)]",
+  );
+  const body = (
+    <>
       <div
         className={cn(
           "absolute left-0 top-3 bottom-3 w-1 rounded-r-full transition-opacity",
-          isActive ? "bg-[#3b6fd4] opacity-100" : "bg-transparent opacity-0",
+          isActive ? "bg-[var(--navy)] opacity-100" : "bg-transparent opacity-0",
         )}
         aria-hidden
       />
@@ -263,19 +281,39 @@ function ArchiveCard({ archive, isActive, onSelect }: ArchiveCardProps) {
             className={cn(
               "mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border",
               isActive
-                ? "border-[#3b6fd430] bg-[#3b6fd418] text-[#6f93e8]"
-                : "border-[#10182814] bg-white/60 text-muted-foreground dark:border-[#2a2d38] dark:bg-[#111215] dark:text-[#6b6b82]",
+                ? "border-[color-mix(in_srgb,var(--navy)_19%,transparent)] bg-[color-mix(in_srgb,var(--navy)_10%,transparent)] text-[var(--navy)]"
+                : "border-[var(--line)] bg-[var(--surface)]/60 text-[var(--slate)] dark:border-[var(--line)] dark:bg-[var(--surface-muted)] dark:text-[var(--slate)]",
             )}
           >
           <ArchiveIcon className="h-4 w-4" />
         </div>
         <div className="min-w-0 flex-1">
-          <div className={cn("truncate text-sm font-medium", isActive ? "text-[#244a7b] dark:text-white" : "text-foreground dark:text-[#eeeef5]")}>{archive.name}</div>
-          <div className={cn("mt-1 line-clamp-2 text-[11px] leading-4", isActive ? "text-[#415168] dark:text-white/70" : "text-muted-foreground dark:text-[#6b6b82]")}>
+          <div className={cn("truncate text-sm font-medium", isActive ? "text-[var(--navy)] dark:text-white" : "text-[var(--ink)] dark:text-[var(--ink)]")}>{archive.name}</div>
+          <div className={cn("mt-1 line-clamp-2 text-xs leading-4", isActive ? "text-[var(--slate)] dark:text-white/70" : "text-[var(--slate)] dark:text-[var(--slate)]")}>
             {archive.topic?.trim() || "Workspace archive"}
           </div>
         </div>
       </div>
+    </>
+  );
+  if (reduce) {
+    return (
+      <button type="button" onClick={onSelect} className={className} data-testid={`button-archive-${archive.id}`}>
+        {body}
+      </button>
+    );
+  }
+  return (
+    <motion.button
+      type="button"
+      onClick={onSelect}
+      whileHover={{ x: 2 }}
+      whileTap={{ scale: 0.98 }}
+      transition={{ duration: 0.15 }}
+      className={className}
+      data-testid={`button-archive-${archive.id}`}
+    >
+      {body}
     </motion.button>
   );
 }
@@ -300,6 +338,7 @@ function SharedSidebarContent({
   const isMobile = layout === "mobile";
 
   const handleDelete = (id: number) => {
+    if (!window.confirm("Delete this conversation?")) return;
     deleteMutation.mutate(
       { id },
       {
@@ -310,6 +349,9 @@ function SharedSidebarContent({
             onMobileClose?.();
           }
         },
+        onError: () => {
+          toast({ title: "Couldn't delete conversation", variant: "destructive" });
+        },
       },
     );
   };
@@ -319,7 +361,7 @@ function SharedSidebarContent({
     onMobileClose?.();
   };
 
-  const handleRename = async (id: number, title: string) => {
+  const handleRename = async (id: number, title: string): Promise<boolean> => {
     try {
       const res = await apiFetch(`/api/anthropic/conversations/${id}`, {
         method: "PATCH",
@@ -327,11 +369,16 @@ function SharedSidebarContent({
         body: JSON.stringify({ title }),
       });
 
-      if (res.ok) {
-        queryClient.invalidateQueries({ queryKey: getListAnthropicConversationsQueryKey() });
+      if (!res.ok) {
+        toast({ title: "Couldn't rename conversation", variant: "destructive" });
+        return false;
       }
+      queryClient.invalidateQueries({ queryKey: getListAnthropicConversationsQueryKey() });
+      return true;
     } catch (error) {
       console.error("Rename failed", error);
+      toast({ title: "Couldn't rename conversation", variant: "destructive" });
+      return false;
     }
   };
 
@@ -348,29 +395,29 @@ function SharedSidebarContent({
   const activeArchive = archives.find((archive) => archive.id === activeArchiveId) ?? null;
 
   return (
-    <div className="flex h-full max-h-dvh min-h-0 flex-col bg-white/88 backdrop-blur-2xl dark:bg-[#0d0e12]">
-      <div className="h-0.5 shrink-0 bg-gradient-to-r from-[#3b6fd4] via-[#d4a03b] to-transparent" aria-hidden />
+    <div className="flex h-full min-h-0 flex-col bg-white/88 backdrop-blur-2xl dark:bg-[var(--surface)]">
+      <div className="h-0.5 shrink-0 bg-[var(--brass)]" aria-hidden />
 
       <div
         className={cn(
-          "shrink-0 overflow-hidden border-b border-[#10182814] dark:border-[#1e2028]",
+          "shrink-0 overflow-hidden border-b border-[var(--line)] dark:border-[var(--line)]",
           isMobile ? "max-h-[50dvh] p-4" : "max-h-[54dvh] px-5 py-4",
         )}
       >
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#6f93e8]">
-              BestDel Intelligence Desk
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--navy)]">
+              Order Paper
             </p>
-            <h2 className="mt-1 text-base font-semibold text-foreground dark:text-[#eeeef5]">Dossier navigation</h2>
-            <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground dark:text-[#6b6b82]">
+            <h2 className="mt-1 text-base font-semibold text-[var(--ink)] dark:text-[var(--ink)]">Dossier navigation</h2>
+            <p className="mt-1 line-clamp-2 text-xs leading-5 text-[var(--slate)] dark:text-[var(--slate)]">
               {activeArchive ? activeArchive.topic || activeArchive.name : "Choose an archive to begin."}
             </p>
           </div>
           {isMobile && (
             <button
               onClick={toggle}
-              className="rounded-xl border border-sidebar-border/60 bg-background/60 p-2 text-muted-foreground transition-colors hover:text-sidebar-foreground"
+              className="rounded-md border border-sidebar-border/60 bg-[var(--surface)]/60 p-2 text-[var(--slate)] transition-colors hover:text-sidebar-foreground"
               aria-label="Toggle dark mode"
               title={isDark ? "Switch to light mode" : "Switch to dark mode"}
             >
@@ -382,7 +429,7 @@ function SharedSidebarContent({
         {isMobile && (
           <div className="mt-4 grid grid-cols-2 gap-2">
             <Button
-              className="h-11 justify-start gap-2 rounded-xl shadow-sm"
+              className="h-11 justify-start gap-2 rounded-md shadow-sm"
               onClick={() => activeArchiveId && handleSelectConversation(null)}
               disabled={!activeArchiveId}
               data-testid="button-new-chat"
@@ -392,7 +439,7 @@ function SharedSidebarContent({
             </Button>
             <Button
               variant="outline"
-              className="h-11 justify-start gap-2 rounded-xl bg-background/80"
+              className="h-11 justify-start gap-2 rounded-md bg-[var(--surface)]/80"
               onClick={() => {
                 onCreateArchive?.();
                 onMobileClose?.();
@@ -407,12 +454,12 @@ function SharedSidebarContent({
 
         <div className="mt-4 space-y-2">
           <div className="flex items-center justify-between">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground dark:text-[#6b6b82]">Dossiers</p>
-            {activeArchive && <span className="text-[11px] text-muted-foreground dark:text-[#6b6b82]">Active brief</span>}
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--slate)] dark:text-[var(--slate)]">Dossiers</p>
+            {activeArchive && <span className="text-xs text-[var(--slate)] dark:text-[var(--slate)]">Active brief</span>}
           </div>
           <div className={cn("grid gap-2 pr-1", isMobile ? "max-h-36 overflow-y-auto overscroll-contain" : "max-h-44 overflow-y-auto overscroll-contain")}>
             {archives.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-sidebar-border/60 px-4 py-5 text-xs text-muted-foreground">
+              <div className="rounded-lg border border-dashed border-sidebar-border/60 px-4 py-5 text-xs text-[var(--slate)]">
                 No dossiers yet. Create one to organize your workspace.
               </div>
             ) : (
@@ -429,12 +476,12 @@ function SharedSidebarContent({
         </div>
 
         <div className="relative mt-4">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--slate)]" />
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search conversations..."
-            className="h-10 rounded-xl border-[#10182814] bg-white/70 pl-9 text-xs text-foreground placeholder:text-muted-foreground focus-visible:ring-[#3b6fd4] dark:border-[#2a2d38] dark:bg-[#111215] dark:text-[#eeeef5] dark:placeholder:text-[#6b6b82]"
+            className="h-10 rounded-md border-[var(--line)] bg-white/70 pl-9 text-xs text-[var(--ink)] placeholder:text-[var(--slate)] focus-visible:ring-[var(--navy)] dark:border-[var(--line)] dark:bg-[var(--surface-muted)] dark:text-[var(--ink)] dark:placeholder:text-[var(--slate)]"
             data-testid="input-search-conversations"
           />
         </div>
@@ -443,20 +490,20 @@ function SharedSidebarContent({
       <ScrollArea className="min-h-0 flex-1 overflow-hidden">
         <div className={cn("space-y-3", isMobile ? "p-4" : "px-5 py-4")}>
           <div className="flex items-center justify-between">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground dark:text-[#6b6b82]">Conversations</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--slate)] dark:text-[var(--slate)]">Conversations</p>
             {activeArchive && filtered.length > 0 && (
-              <span className="text-[11px] text-muted-foreground">{filtered.length} items</span>
+              <span className="text-xs text-[var(--slate)]">{filtered.length} items</span>
             )}
           </div>
 
           {isLoading ? (
             <div className="space-y-2">
               {[1, 2, 3].map((item) => (
-                <div key={item} className="h-16 animate-pulse rounded-2xl bg-muted/50" />
+                <div key={item} className="h-16 animate-pulse rounded-lg bg-[var(--surface-muted)]/50" />
               ))}
             </div>
           ) : filtered.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-sidebar-border/60 px-4 py-8 text-center text-xs text-muted-foreground">
+            <div className="rounded-lg border border-dashed border-sidebar-border/60 px-4 py-8 text-center text-xs text-[var(--slate)]">
               {activeArchiveId
                 ? "No conversations in this archive yet. Start a new chat."
                 : "Choose an archive to begin."}
@@ -478,11 +525,11 @@ function SharedSidebarContent({
 
       <div
         className={cn(
-          "shrink-0 overflow-y-auto border-t border-[#10182814] dark:border-[#1e2028]",
+          "shrink-0 overflow-y-auto border-t border-[var(--line)] dark:border-[var(--line)]",
           isMobile ? "max-h-[34dvh] p-4" : "max-h-[36dvh] px-5 py-4",
         )}
       >
-        <div className="rounded-xl border border-[#10182814] bg-white/65 p-3 shadow-[0_8px_24px_rgba(16,24,40,0.04)] dark:border-[#1e2028] dark:bg-[#111215]">
+        <div className="rounded-md border border-[var(--line)] bg-white/65 p-3 shadow-[0_8px_24px_rgba(16,24,40,0.04)] dark:border-[var(--line)] dark:bg-[var(--surface-muted)]">
           <ModelLimitsPanel />
         </div>
 
@@ -490,23 +537,23 @@ function SharedSidebarContent({
           <>
             <button
               onClick={() => setSettingsOpen(true)}
-              className="mt-3 flex w-full items-center gap-3 rounded-2xl border border-sidebar-border/60 bg-sidebar/70 px-3 py-3 text-left transition-colors hover:bg-sidebar-accent/70"
+              className="mt-3 flex w-full items-center gap-3 rounded-lg border border-sidebar-border/60 bg-sidebar/70 px-3 py-3 text-left transition-colors hover:bg-sidebar-accent/70"
               aria-label="Settings"
             >
-              <SettingsIcon className="h-4 w-4 text-muted-foreground" />
+              <SettingsIcon className="h-4 w-4 text-[var(--slate)]" />
               <span className="text-xs font-medium text-sidebar-foreground">Settings & system prompts</span>
             </button>
 
             <button
               onClick={toggle}
-              className="mt-2 flex w-full items-center justify-between rounded-2xl border border-sidebar-border/60 bg-sidebar/70 px-3 py-3 transition-colors hover:bg-sidebar-accent/70"
+              className="mt-2 flex w-full items-center justify-between rounded-lg border border-sidebar-border/60 bg-sidebar/70 px-3 py-3 transition-colors hover:bg-sidebar-accent/70"
               aria-label="Toggle dark mode"
             >
               <div className="flex items-center gap-3">
                 {isDark ? (
                   <Sun className="h-4 w-4 text-amber-400" />
                 ) : (
-                  <Moon className="h-4 w-4 text-muted-foreground" />
+                  <Moon className="h-4 w-4 text-[var(--slate)]" />
                 )}
                 <span className="text-xs font-medium text-sidebar-foreground">
                   {isDark ? "Light mode" : "Dark mode"}
@@ -515,7 +562,7 @@ function SharedSidebarContent({
               <div
                 className={cn(
                   "relative h-4 w-8 rounded-full transition-colors",
-                  isDark ? "bg-primary" : "bg-muted",
+                  isDark ? "bg-primary" : "bg-[var(--surface-muted)]",
                 )}
               >
                 <div
@@ -553,25 +600,28 @@ function DesktopSidebar({
   const { isDark, toggle } = useDarkMode();
   const [desktopExpanded, setDesktopExpanded] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const reduce = useReducedMotion();
+  const railClassName = "relative z-20 hidden h-full shrink-0 border-r border-[var(--line)] bg-[var(--surface)]/72 shadow-[8px_0_24px_rgba(16,24,40,0.04)] backdrop-blur-2xl md:flex dark:border-[var(--line)] dark:bg-[var(--surface)]";
+  const panelClassName = cn(
+    "relative h-full shrink-0 overflow-hidden border-r border-[var(--line)] bg-[var(--surface)]/82 backdrop-blur-2xl dark:border-[var(--line)] dark:bg-[var(--surface)]",
+    !desktopExpanded && "pointer-events-none",
+  );
 
-  return (
-    <motion.aside
-      initial={false}
-      className="relative z-30 hidden h-full shrink-0 border-r border-[#10182814] bg-white/72 shadow-[8px_0_24px_rgba(16,24,40,0.04)] backdrop-blur-2xl md:flex dark:border-[#1e2028] dark:bg-[#0d0e12]"
-    >
-      <div className="flex w-16 shrink-0 flex-col items-center justify-between border-r border-[#10182814] px-2 py-3 dark:border-[#1e2028]">
+  const railInner = (
+    <>
+      <div className="flex w-16 shrink-0 flex-col items-center justify-between border-r border-[var(--line)] px-2 py-3 dark:border-[var(--line)]">
         <div className="flex w-full flex-col items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-[#3b6fd450] bg-[#3b6fd4] shadow-[0_0_28px_rgba(59,111,212,0.28)]">
-            <Bot className="h-5 w-5 text-white" />
+          <div className="flex h-10 w-10 items-center justify-center rounded-md border border-[color-mix(in_srgb,var(--navy)_40%,transparent)] bg-[var(--navy)]">
+            <Scale className="h-5 w-5 text-white" />
           </div>
 
-          <div className="pt-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-muted-foreground dark:text-[#4f5266]">Desk</div>
+          <div className="pt-1 text-2xs font-semibold uppercase tracking-[0.14em] text-[var(--slate)] dark:text-[var(--muted-ink)]">Desk</div>
 
           <RailTooltip label={desktopExpanded ? "Collapse navigation panel" : "Expand navigation panel"}>
             <Button
               variant="ghost"
               size="icon"
-              className="h-9 w-9 rounded-xl border border-[#10182814] bg-white/70 text-muted-foreground hover:border-[#3b6fd450] hover:bg-muted hover:text-foreground dark:border-[#2a2d38] dark:bg-[#111215] dark:text-[#9a9ab0] dark:hover:bg-[#1a1c22] dark:hover:text-[#eeeef5]"
+              className="h-9 w-9 rounded-md border border-[var(--line)] bg-white/70 text-[var(--slate)] hover:border-[color-mix(in_srgb,var(--navy)_31%,transparent)] hover:bg-[var(--surface-muted)] hover:text-[var(--ink)] dark:border-[var(--line)] dark:bg-[var(--surface-muted)] dark:text-[var(--muted-ink)] dark:hover:bg-[var(--surface-muted)] dark:hover:text-[var(--ink)]"
               onClick={() => setDesktopExpanded((current) => !current)}
               aria-label={desktopExpanded ? "Collapse navigation panel" : "Expand navigation panel"}
             >
@@ -582,7 +632,7 @@ function DesktopSidebar({
           <RailTooltip label="New chat">
             <Button
               size="icon"
-              className="h-9 w-9 rounded-xl bg-[#3b6fd4] text-white shadow-sm shadow-[#3b6fd420] hover:bg-[#6f93e8]"
+              className="h-9 w-9 rounded-md bg-[var(--navy)] text-white  hover:bg-[var(--navy-hover)]"
               onClick={() => activeArchiveId && onSelectConversation(null)}
               disabled={!activeArchiveId}
               aria-label="New chat"
@@ -596,7 +646,7 @@ function DesktopSidebar({
             <Button
               variant="outline"
               size="icon"
-              className="h-9 w-9 rounded-xl border-[#10182814] bg-white/70 text-muted-foreground hover:border-[#d4a03b50] hover:bg-muted hover:text-[#d4a03b] dark:border-[#2a2d38] dark:bg-[#111215] dark:text-[#9a9ab0] dark:hover:bg-[#1a1c22]"
+              className="h-9 w-9 rounded-md border-[var(--line)] bg-white/70 text-[var(--slate)] hover:border-[color-mix(in_srgb,var(--brass)_31%,transparent)] hover:bg-[var(--surface-muted)] hover:text-[var(--brass)] dark:border-[var(--line)] dark:bg-[var(--surface-muted)] dark:text-[var(--muted-ink)] dark:hover:bg-[var(--surface-muted)]"
               onClick={onCreateArchive}
               aria-label="New archive"
               data-testid="button-new-archive"
@@ -606,13 +656,13 @@ function DesktopSidebar({
           </RailTooltip>
         </div>
 
-        <div className="flex w-full flex-col items-center gap-3 border-t border-[#10182814] pt-3 dark:border-[#1e2028]">
-          <div className="text-[9px] font-semibold uppercase tracking-[0.14em] text-muted-foreground dark:text-[#4f5266]">System</div>
+        <div className="flex w-full flex-col items-center gap-3 border-t border-[var(--line)] pt-3 dark:border-[var(--line)]">
+          <div className="text-2xs font-semibold uppercase tracking-[0.14em] text-[var(--slate)] dark:text-[var(--muted-ink)]">System</div>
           <RailTooltip label="Settings and provider keys">
             <Button
               variant="ghost"
               size="icon"
-              className="h-9 w-9 rounded-xl border border-[#10182814] bg-white/70 text-muted-foreground hover:border-[#3b6fd450] hover:bg-muted hover:text-foreground dark:border-[#2a2d38] dark:bg-[#111215] dark:text-[#9a9ab0] dark:hover:bg-[#1a1c22] dark:hover:text-[#eeeef5]"
+              className="h-9 w-9 rounded-md border border-[var(--line)] bg-white/70 text-[var(--slate)] hover:border-[color-mix(in_srgb,var(--navy)_31%,transparent)] hover:bg-[var(--surface-muted)] hover:text-[var(--ink)] dark:border-[var(--line)] dark:bg-[var(--surface-muted)] dark:text-[var(--muted-ink)] dark:hover:bg-[var(--surface-muted)] dark:hover:text-[var(--ink)]"
               onClick={() => setSettingsOpen(true)}
               aria-label="Settings and provider keys"
             >
@@ -624,7 +674,7 @@ function DesktopSidebar({
             <Button
               variant="ghost"
               size="icon"
-              className="h-9 w-9 rounded-xl border border-[#10182814] bg-white/70 text-muted-foreground hover:border-[#d4a03b50] hover:bg-muted hover:text-[#d4a03b] dark:border-[#2a2d38] dark:bg-[#111215] dark:text-[#9a9ab0] dark:hover:bg-[#1a1c22]"
+              className="h-9 w-9 rounded-md border border-[var(--line)] bg-white/70 text-[var(--slate)] hover:border-[color-mix(in_srgb,var(--brass)_31%,transparent)] hover:bg-[var(--surface-muted)] hover:text-[var(--brass)] dark:border-[var(--line)] dark:bg-[var(--surface-muted)] dark:text-[var(--muted-ink)] dark:hover:bg-[var(--surface-muted)]"
               onClick={toggle}
               aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
             >
@@ -634,33 +684,60 @@ function DesktopSidebar({
         </div>
       </div>
 
-      <motion.div
-        initial={false}
-        animate={{
-          width: desktopExpanded ? 288 : 0,
-          opacity: desktopExpanded ? 1 : 0,
-        }}
-        transition={{ duration: 0.3, ease: [0.25, 0.46, 0.45, 0.94] }}
-        className={cn(
-          "absolute left-full top-0 h-full overflow-hidden border-r border-[#10182814] bg-white/82 shadow-[24px_0_80px_rgba(16,24,40,0.12),0_-1px_0_rgba(59,111,212,0.08)] backdrop-blur-2xl dark:border-[#1e2028] dark:bg-[#0d0e12] dark:shadow-[24px_0_80px_rgba(0,0,0,0.32),0_-1px_0_rgba(59,111,212,0.18)]",
-          !desktopExpanded && "pointer-events-none",
-        )}
-      >
-        <div className="h-full w-[288px]">
-          <SharedSidebarContent
-            activeConversationId={activeConversationId}
-            activeArchiveId={activeArchiveId}
-            onSelectConversation={onSelectConversation}
-            onSelectArchive={onSelectArchive}
-            onCreateArchive={onCreateArchive}
-            layout="desktop"
-            settingsOpen={settingsOpen}
-            setSettingsOpen={setSettingsOpen}
-          />
+      {reduce ? (
+        <div
+          className={panelClassName}
+          style={{ width: desktopExpanded ? 288 : 0, opacity: desktopExpanded ? 1 : 0 }}
+        >
+          <div className="h-full w-[288px]">
+            <SharedSidebarContent
+              activeConversationId={activeConversationId}
+              activeArchiveId={activeArchiveId}
+              onSelectConversation={onSelectConversation}
+              onSelectArchive={onSelectArchive}
+              onCreateArchive={onCreateArchive}
+              layout="desktop"
+              settingsOpen={settingsOpen}
+              setSettingsOpen={setSettingsOpen}
+            />
+          </div>
         </div>
-      </motion.div>
+      ) : (
+        <motion.div
+          initial={false}
+          animate={{
+            width: desktopExpanded ? 288 : 0,
+            opacity: desktopExpanded ? 1 : 0,
+          }}
+          transition={{ duration: 0.3, ease: [0.25, 0.46, 0.45, 0.94] }}
+          className={panelClassName}
+        >
+          <div className="h-full w-[288px]">
+            <SharedSidebarContent
+              activeConversationId={activeConversationId}
+              activeArchiveId={activeArchiveId}
+              onSelectConversation={onSelectConversation}
+              onSelectArchive={onSelectArchive}
+              onCreateArchive={onCreateArchive}
+              layout="desktop"
+              settingsOpen={settingsOpen}
+              setSettingsOpen={setSettingsOpen}
+            />
+          </div>
+        </motion.div>
+      )}
 
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+    </>
+  );
+
+  if (reduce) {
+    return <aside className={railClassName}>{railInner}</aside>;
+  }
+
+  return (
+    <motion.aside initial={false} className={railClassName}>
+      {railInner}
     </motion.aside>
   );
 }

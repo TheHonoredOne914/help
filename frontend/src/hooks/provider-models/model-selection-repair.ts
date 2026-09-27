@@ -18,6 +18,10 @@ export function repairSelectedModel(
   healthyResearchModels: string[],
   context: RepairContext = {},
 ): string | null {
+  if (/llama-3\.3-70b-versatile/i.test(selectedModel)) {
+    const usable = healthyResearchModels.filter((model) => !/llama-3\.3-70b-versatile/i.test(model));
+    return preferredModel(usable) ?? preferredModel(healthyResearchModels);
+  }
   if (healthyResearchModels.includes(selectedModel)) return selectedModel;
   if (isUserSelectedProviderStillAllowed(selectedModel, context)) return selectedModel;
   if (healthyResearchModels.length === 0) return null;

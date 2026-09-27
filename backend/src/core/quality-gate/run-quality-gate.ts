@@ -1,14 +1,10 @@
 import { assertAgendaLock } from "../agenda/agenda-contract.js";
-import { runCitationQualityGate } from "./citation-quality-gate.js";
+import { runCitationQualityGate } from "../verification/citation-validator.js";
 import { runClaimGroundingGate } from "./claim-grounding-gate.js";
-import { runCrossDivisionQualityGate } from "./cross-division-quality-gate.js";
-import { runDivisionQualityGate } from "./division-quality-gate.js";
-import { runElectoralSafetyGate } from "./electoral-safety-gate.js";
 import { runFallbackQualityGate } from "./fallback-quality-gate.js";
 import { runFinalAnswerLengthGate } from "./final-answer-length-gate.js";
-import { runLegalSafetyGate } from "./legal-safety-gate.js";
 import { resolveQualityMode, thresholdsFor } from "./mode-thresholds.js";
-import { runParliamentFramingGate } from "./parliament-framing-gate.js";
+import { runSafetyQualityGate } from "./safety-quality-gate.js";
 import { runSourceDiversityGate } from "./source-diversity-gate.js";
 import { buildQualityTelemetry } from "./quality-telemetry.js";
 import type { GateResult, QualityGateReport, QualityGateRuntimeInput, QualityIssue } from "./types.js";
@@ -17,16 +13,13 @@ export function runQualityGate(ctx: QualityGateRuntimeInput): QualityGateReport 
   const mode = resolveQualityMode(ctx.input.mode, ctx.contract.outputDepth);
   const thresholds = thresholdsFor(mode);
   const agenda = runAgendaGate(ctx);
+  const citationGate = runCitationGate(ctx);
   const gateResults: GateResult[] = [
     agenda,
-    runCitationQualityGate(ctx),
+    citationGate,
     runSourceDiversityGate(ctx, thresholds),
     runClaimGroundingGate(ctx, thresholds),
-    runDivisionQualityGate(ctx, thresholds),
-    runCrossDivisionQualityGate(ctx),
-    runLegalSafetyGate(ctx),
-    runElectoralSafetyGate(ctx),
-    runParliamentFramingGate(ctx),
+    runSafetyQualityGate(ctx),
     runFallbackQualityGate(ctx),
     runFinalAnswerLengthGate(ctx, thresholds),
     runSourceGapBridgeGate(ctx),
@@ -71,6 +64,17 @@ export function runQualityGate(ctx: QualityGateRuntimeInput): QualityGateReport 
   };
 }
 
+function runCitationGate(ctx: QualityGateRuntimeInput): GateResult {
+  const report = runCitationQualityGate(ctx.finalText, ctx.registry);
+  return {
+    score: report.score,
+    maxScore: report.maxScore,
+    issues: report.issues.map((issue) => ({ ...issue, severity: issue.severity as QualityIssue["severity"] })),
+    metrics: { linkedCitationCount: report.linkedCitationCount },
+    categoryScores: { citationValidity: report.score },
+  };
+}
+
 const FRAUD_AND_HALLUCINATION_PATTERNS = [
   /\b(?:generative|constitutional)\s+(?:ai|algorithm|intelligence|writ)\b/i,
   /\b(?:ai|algorithm)(?:\s+governance|\s+bias|\s+ethics|\s+regulation|\s+accountability)\b/i,
@@ -101,7 +105,6 @@ function detectFraudOrHallucination(text: string, contract?: QualityGateRuntimeI
 function runAgendaGate(ctx: QualityGateRuntimeInput): GateResult {
   const issues: QualityIssue[] = [];
   const report = assertAgendaLock(ctx.finalText, ctx.contract);
-  // Comprehensive fraud/hallucination detection for all topics, not just democratic_space
   const fraudMatches = detectFraudOrHallucination(ctx.finalText, ctx.contract);
   for (const fraud of fraudMatches) {
     issues.push({ code: "agenda_drift", message: `potential fraud/hallucination: "${fraud}"`, severity: "fatal" });
@@ -125,8 +128,7 @@ function runSourceGapBridgeGate(ctx: QualityGateRuntimeInput): GateResult {
   if (!ctx.input.sourceGapReport) return { score: 0, maxScore: 0, issues: [] };
   const issues: QualityIssue[] = [];
   const severeCodes = ["electoral_integrity", "legal_accuracy", "parliament_framing", "claim_grounding_traceability"];
-  const text = ctx.finalText;
-  const bypassMatches = detectFraudOrHallucination(text, ctx.contract);
+  const bypassMatches = detectFraudOrHallucination(ctx.finalText, ctx.contract);
   if (bypassMatches.length > 0) {
     issues.push({ code: "source_gap_bypass", message: `source_gap_bypass: SourceGapReport cannot bypass ${severeCodes.join(", ")} (detected: ${bypassMatches.join(", ")})`, severity: "fatal" });
   }

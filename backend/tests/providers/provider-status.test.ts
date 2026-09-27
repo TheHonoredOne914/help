@@ -18,12 +18,12 @@ test("provider status distinguishes missing and configured providers without lea
     hfToken: null,
   }, {
     cacheKey: "provider-status-test",
-    fetchFn: async () => new Response(JSON.stringify({ data: [{ id: "moonshotai/kimi-k2.6" }] }), { status: 200 }) as any,
+    fetchFn: async () => new Response(JSON.stringify({ data: [{ id: "nvidia/llama-3.3-nemotron-super-49b-v1" }] }), { status: 200 }) as any,
   });
 
   assert.equal(payload.providers.nvidia.configured, true);
   assert.equal(payload.providers.nvidia.healthy, true);
-  assert.ok(payload.providers.nvidia.models?.includes("moonshotai/kimi-k2.6"));
+  assert.ok(payload.providers.nvidia.models?.includes("nvidia/llama-3.3-nemotron-super-49b-v1"));
   assert.equal(payload.providers.github.configured, true);
   assert.equal(payload.providers.groq.status, "missing_key");
   assert.doesNotMatch(JSON.stringify(payload), /secret/);

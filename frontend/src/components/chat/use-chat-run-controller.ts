@@ -59,6 +59,7 @@ interface UseChatRunControllerResult {
     nm?: NormalModel,
     mode?: ChatMode,
     rhetoricsOpts?: { rhetoricsType: RhetoricsType; creativity: number },
+    regenerate?: boolean,
   ) => Promise<boolean>;
   handleStop: () => void;
   abortAllStreams: () => void;
@@ -75,8 +76,72 @@ const TERMINAL_INITIAL_STATE: StreamTerminalEventState = {
 
 const RETRIEVING_COUNCILLOR_ID_SET = new Set<string>(RETRIEVING_COUNCILLOR_IDS);
 
+const VALID_RESEARCH_MODES: ReadonlySet<string> = new Set([
+  "fast_research",
+  "deep_research",
+  "council",
+]);
+
+function asResearchMode(value: unknown): "fast_research" | "deep_research" | "council" | null {
+  return typeof value === "string" && VALID_RESEARCH_MODES.has(value)
+    ? (value as "fast_research" | "deep_research" | "council")
+    : null;
+}
+
 function createClientRunId(): string {
   return `client_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function capToastDescription(message: string): string {
+  const text = message.replace(/\s+/g, " ").trim();
+  if (text.length <= 200) return text;
+  return `${text.slice(0, 197)}...`;
+}
+
+function rateLimitTitle(data: Record<string, unknown>): string {
+  const named = typeof data.provider === "string"
+    ? data.provider.trim()
+    : typeof data.providerName === "string"
+      ? data.providerName.trim()
+      : "";
+  if (!named) return "Rate limited";
+  return `${named.charAt(0).toUpperCase()}${named.slice(1)} rate-limited`;
+}
+
+function isWaitingPlaceholder(content: string): boolean {
+  return /waiting for streamed output/i.test(content);
+}
+
+function keepStreamedAnswerOverPlaceholder(
+  queryClient: QueryClient,
+  convId: number,
+  streamed: string,
+  assistantMessageId: string | number | null,
+): void {
+  const text = streamed.trim();
+  if (!text) return;
+  queryClient.setQueryData(getGetAnthropicConversationQueryKey(convId), (old: AnthropicConversation | undefined) => {
+    if (!old?.messages?.length) return old;
+    const messages = old.messages;
+    let index = assistantMessageId == null
+      ? -1
+      : messages.findIndex((msg) => String(msg.id) === String(assistantMessageId));
+    if (index < 0) {
+      for (let i = messages.length - 1; i >= 0; i -= 1) {
+        const row = messages[i];
+        if (row?.role === "assistant" && isWaitingPlaceholder(row.content ?? "")) {
+          index = i;
+          break;
+        }
+      }
+    }
+    if (index < 0) return old;
+    const row = messages[index];
+    if (!row || row.role !== "assistant" || !isWaitingPlaceholder(row.content ?? "")) return old;
+    const next = messages.slice();
+    next[index] = { ...row, content: text };
+    return { ...old, messages: next };
+  });
 }
 
 function providerLabelForModel(modelId: string): string {
@@ -85,6 +150,8 @@ function providerLabelForModel(modelId: string): string {
   if (modelId.startsWith("gemini/")) return "gemini";
   if (modelId.startsWith("openrouter/")) return "openrouter";
   if (modelId.startsWith("github/")) return "github";
+  if (modelId.startsWith("cerebras/")) return "cerebras";
+  if (modelId.startsWith("opencode/")) return "opencode";
   return "groq";
 }
 
@@ -146,6 +213,11 @@ export function useChatRunController({
   const streamStartRef = useRef<number>(0);
   const streamCharsRef = useRef<number>(0);
   const silenceTimerResetRef = useRef<(() => void) | null>(null);
+  // Mode the UI actually requested for the in-flight run. Backend SSE envelopes
+  // always carry an effectiveResearchMode (deep_research fallback even for
+  // drafting), so never trust it blindly — bind it to what was requested.
+  const requestedModeRef = useRef<ChatMode>("normal");
+  const requestedRhetoricsRef = useRef(false);
 
   const abortAllStreams = useCallback(() => {
     globalStreamRegistry.abortAll();
@@ -178,10 +250,15 @@ export function useChatRunController({
     nm: NormalModel = DEFAULT_GROQ_MODEL,
     mode: ChatMode = "normal",
     rhetoricsOpts?: { rhetoricsType: RhetoricsType; creativity: number },
+    regenerate = false,
   ): Promise<boolean> => {
-    const userSystemPrompt = rhetoricsOpts ? "" : getSystemPromptForMode(mode);
+    const userSystemPrompt = getSystemPromptForMode(rhetoricsOpts ? "normal" : mode);
     const activeProviderModel = getPrimaryModelForMode(mode, nm);
     const modelsForMode = getModelsForMode(mode, nm);
+    // Snapshot the requested mode for this run so late/poisoned backend mode
+    // labels can't re-skin the UI into a different mode mid-stream.
+    requestedModeRef.current = mode;
+    requestedRhetoricsRef.current = Boolean(rhetoricsOpts);
     const controller = new AbortController();
     const clientRunId = createClientRunId();
     let streamRunId = clientRunId;
@@ -201,7 +278,12 @@ export function useChatRunController({
       researchMode: mode,
     });
     globalStreamRegistry.add(clientRunId, controller, convId);
-    dispatchPipeline({ type: "SET_ACTIVE_RUN", runId: clientRunId, conversationId: convId });
+    dispatchPipeline({
+      type: "SET_ACTIVE_RUN",
+      runId: clientRunId,
+      conversationId: convId,
+      researchMode: mode === "normal" ? "normal" : mode,
+    });
 
     const onVisibilityChange = () => {
       if (document.visibilityState === "visible") {
@@ -239,6 +321,7 @@ export function useChatRunController({
           autoFallback,
           userSystemPrompt,
           rhetoricsOpts,
+          regenerate,
         })),
         signal: controller.signal,
       });
@@ -264,7 +347,7 @@ export function useChatRunController({
         dispatchPipeline({ type: "RUN_STATUS", status: providerLikeFailure ? "provider_error" : "failed" });
         toast({
           title: providerLikeFailure ? "Provider error" : "Stream request failed",
-          description: errorMessage,
+          description: capToastDescription(errorMessage),
           variant: "destructive",
         });
         return false;
@@ -319,6 +402,13 @@ export function useChatRunController({
                   try {
                     const flushedData = JSON.parse(dataStr) as Record<string, unknown>;
                     const normalized = normalizeStreamEvent(flushedData, globalStreamRegistry.getActiveRun(), convId);
+                    if (typeof flushedData.content === "string" && flushedData.content) {
+                      const contentChunk = flushedData.content;
+                      streamedAssistantText += contentChunk;
+                      dispatchPipeline({ type: "CONTENT", chunk: contentChunk });
+                      streamCharsRef.current += contentChunk.length;
+                      gotContent = true;
+                    }
                     if (normalized.kind === "terminal") {
                       terminalState = updateTerminalEventState(terminalState, normalized);
                     }
@@ -363,6 +453,7 @@ export function useChatRunController({
                   runId: String(normalized.nextIdentity.runId),
                   assistantMessageId: normalized.nextIdentity.assistantMessageId ?? null,
                   conversationId: normalized.nextIdentity.conversationId ?? convId,
+                  researchMode: mode === "normal" ? "normal" : mode,
                 });
               }
 
@@ -443,6 +534,13 @@ export function useChatRunController({
                       : undefined,
                   },
                 });
+                if (data.corePipelineEvent === "bucket_search_started") {
+                  const planned = Number((data.corePipelineData as { queries?: number } | undefined)?.queries ?? 0);
+                  if (planned > 0) {
+                    dispatchPipeline({ type: "QUERIES_PLANNED", model: normalModel, count: planned });
+                    dispatchPipeline({ type: "SEARCHING", model: normalModel, query: `Bucketed retrieval (${planned} queries)` });
+                  }
+                }
               }
               if (data.sourceContract && typeof data.sourceContract === "object") {
                 dispatchPipeline({ type: "SOURCE_CONTRACT", contract: data.sourceContract as any });
@@ -457,11 +555,26 @@ export function useChatRunController({
                 terminalState = markCitationStatusReceived(terminalState);
                 dispatchPipeline({ type: "CITATION_STATUS", status: data.citationStatus as any });
               }
-              if (typeof data.selectedResearchMode === "string") {
-                dispatchPipeline({ type: "SELECTED_RESEARCH_MODE", mode: data.selectedResearchMode as any });
-              }
-              if (typeof data.effectiveResearchMode === "string") {
-                dispatchPipeline({ type: "SELECTED_RESEARCH_MODE", mode: data.effectiveResearchMode as any });
+              // Mode labels are run-scoped: only accept valid research modes, only
+              // for runs that actually requested research, and prefer the
+              // explicit selectedResearchMode over the envelope's fallback
+              // effectiveResearchMode (which defaults to deep_research even
+              // for drafting/normal runs).
+              const requestedMode = requestedModeRef.current;
+              const requestedResearch = !requestedRhetoricsRef.current
+                && VALID_RESEARCH_MODES.has(requestedMode);
+              if (requestedResearch) {
+                const selected = asResearchMode(data.selectedResearchMode);
+                if (selected) {
+                  dispatchPipeline({ type: "SELECTED_RESEARCH_MODE", mode: selected });
+                } else {
+                  const effective = asResearchMode(data.effectiveResearchMode);
+                  // Only accept the fallback label when it agrees with what
+                  // was requested — never let e.g. a fast run re-skin as deep.
+                  if (effective && effective === requestedMode) {
+                    dispatchPipeline({ type: "SELECTED_RESEARCH_MODE", mode: effective });
+                  }
+                }
               }
               if (data.eventType === "council_c_started" && isRetrievingCouncillorId(data.councillorId)) {
                 dispatchPipeline({
@@ -506,6 +619,18 @@ export function useChatRunController({
               }
               if (data.fullSourceManifest && typeof data.fullSourceManifest === "object" && Array.isArray((data.fullSourceManifest as any).sources)) {
                 dispatchPipeline({ type: "FULL_SOURCE_MANIFEST", manifest: data.fullSourceManifest as any });
+              } else if (Array.isArray(data.sources) && data.sources.length > 0) {
+                const mapped = (data.sources as Array<Record<string, unknown>>).map((source, index) => ({
+                  index: Number(source.sourceId ?? source.index ?? index + 1),
+                  title: String(source.title ?? source.url ?? `Source ${index + 1}`),
+                  url: String(source.url ?? ""),
+                  badge: String(source.sourceType ?? source.badge ?? "WEB"),
+                  sourceType: String(source.sourceType ?? "web"),
+                  score: 0,
+                  hasFullContent: false,
+                  contentPreview: "",
+                }));
+                dispatchPipeline({ type: "FULL_SOURCE_MANIFEST", manifest: { totalSources: mapped.length, sources: mapped } });
               }
               if (data.researchPlan && Array.isArray(data.researchPlan)) {
                 dispatchPipeline({ type: "RESEARCH_PLAN", subQueries: data.researchPlan as string[] });
@@ -588,7 +713,8 @@ export function useChatRunController({
 
               if (data.verified) {
                 dispatchPipeline({ type: "VERIFIED", verification: data.verified as any });
-                recordModelUse("groq");
+                const verifiedModel = typeof data.model === "string" ? data.model : activeProviderModel;
+                if (providerLabelForModel(verifiedModel) === "groq") recordModelUse("groq");
               }
               if (data.fallback) dispatchPipeline({ type: "FALLBACK", model: String(data.fallback) });
 
@@ -641,7 +767,7 @@ export function useChatRunController({
               // Fix (Bug: L534): add duration so the toast auto-dismisses
               if (data.rateLimited || data.rate_limited) {
                 toast({
-                  title: "Groq rate-limited",
+                  title: rateLimitTitle(data),
                   description: "Please slow down a bit, or switch to a smaller model.",
                   variant: "destructive",
                   duration: 8000,
@@ -661,7 +787,8 @@ export function useChatRunController({
                 }
                 dispatchPipeline({ type: "RUN_STATUS", status: normalized.status });
                 dispatchPipeline({ type: "COMPLETE" });
-                recordModelUse("groq");
+                const finishedModel = typeof data.model === "string" ? data.model : activeProviderModel;
+                if (providerLabelForModel(finishedModel) === "groq") recordModelUse("groq");
                 window.dispatchEvent(new CustomEvent("bestdel:chat-provider-success", {
                   detail: { provider: providerLabelForModel(activeProviderModel), model: activeProviderModel },
                 }));
@@ -726,6 +853,12 @@ export function useChatRunController({
               console.error("Failed to parse SSE data", e);
             }
           }
+          // Terminal failure already surfaced to the user via toast + RUN_STATUS.
+          // Exit promptly so isStreaming clears even if the server never closes the SSE body.
+          if (terminalState.failureReceived) {
+            try { await reader.cancel(); } catch { /* reader already closed */ }
+            break;
+          }
         }
       } finally {
         if (silenceTimer) clearTimeout(silenceTimer);
@@ -735,8 +868,11 @@ export function useChatRunController({
       
       // Fix: If the stream closed but we never received a terminal event from the backend,
       // force transition the pipeline out of the "running" state so the UI doesn't lock up.
+      // A user-initiated abort (Stop) lands on "cancelled"; only the silence-timeout
+      // abort or a quiet close with no content lands on "failed".
       if (!terminalState.failureReceived && !terminalState.successReceived) {
-        dispatchPipeline({ type: "RUN_STATUS", status: streamSucceeded ? "completed" : "failed" });
+        const abortedByUser = controller.signal.aborted && !streamAborted;
+        dispatchPipeline({ type: "RUN_STATUS", status: streamSucceeded ? "completed" : abortedByUser ? "cancelled" : "failed" });
         dispatchPipeline({ type: "COMPLETE" });
       }
 
@@ -774,6 +910,9 @@ export function useChatRunController({
       }
       dispatchPipeline({ type: "CLEAR_CURRENT_SEARCH" });
       await queryClient.invalidateQueries({ queryKey: getGetAnthropicConversationQueryKey(convId) });
+      if (streamedAssistantText.trim()) {
+        keepStreamedAnswerOverPlaceholder(queryClient, convId, streamedAssistantText, serverAssistantMessageId ?? null);
+      }
       queryClient.invalidateQueries({ queryKey: getListAnthropicConversationsQueryKey() });
     }
   }, [

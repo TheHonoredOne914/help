@@ -123,7 +123,7 @@ function evidenceCandidates(source: EvidenceSource): Array<Omit<SourceUsageEvide
     ? "snippet"
     : source.extractionQuality === "failed"
       ? "failed"
-      : source.keyFacts.every((fact) => /^title-only relevance:/i.test(fact.trim()))
+      : source.keyFacts.length > 0 && source.keyFacts.every((fact) => /^title-only relevance:/i.test(fact.trim()))
         ? "title_only"
         : source.extractionQuality;
   const candidates: Array<Omit<SourceUsageEvidenceSpan, "sharedTokens">> = [];

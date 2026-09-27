@@ -16,6 +16,10 @@ test("extractProviderKeys trims values and accepts header arrays case-insensitiv
   assert.equal(keys.openrouterKey, "or-live");
   assert.equal(keys.githubToken, "gh-live");
   assert.equal(keys.nvidiaKey, "nvapi-live");
+  const zen = extractProviderKeys({
+    headers: { "x-opencode-api-key": "  oc-live  " },
+  }, {});
+  assert.equal(zen.opencodeKey, "oc-live");
 });
 
 test("extractProviderKeys preserves search and extraction provider keys", () => {
@@ -53,6 +57,9 @@ test("extractProviderKeys supports server env fallback", () => {
     EXA_API_KEY: "exa-env",
     BRAVE_API_KEY: "brave-env",
     JINA_API_KEY: "jina-env",
+    CEREBRAS_API_KEY: "csk-env",
+    OPENAI_API_KEY: "sk-env",
+    OPENCODE_API_KEY: "oc-env",
     HF_TOKEN: "hf-env",
   });
 
@@ -70,6 +77,7 @@ test("extractProviderKeys supports server env fallback", () => {
   assert.equal(keys.braveKey, "brave-env");
   assert.equal(keys.jinaKey, "jina-env");
   assert.equal(keys.hfToken, "hf-env");
+  assert.equal(keys.opencodeKey, "oc-env");
 });
 
 test("extractProviderKeys joins numbered rollback keys for multi-key fallback", () => {

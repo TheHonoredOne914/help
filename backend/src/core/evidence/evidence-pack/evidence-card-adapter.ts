@@ -8,7 +8,7 @@ import { retrievalCacheManager } from "../../retrieval-cache/index.js";
 export function toEvidenceCard(source: EvidenceSource, registry: EvidenceRegistryCore, query = ""): EvidenceCard {
   const agendaFingerprint = query || registry.contract.normalizedAgenda;
   const cached = retrievalCacheManager.getEvidenceCard(source, agendaFingerprint);
-  if (cached && (source.limitedSource || !cached.limitedSource)) {
+  if (cached && Boolean(cached.limitedSource) === Boolean(source.limitedSource)) {
     return cached;
   }
   const card = buildEvidenceCard(source, registry);

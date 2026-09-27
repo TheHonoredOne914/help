@@ -3,7 +3,7 @@ import { canonicalizeUrl, type SourceClass } from "../evidence/evidence-registry
 import { normalizeEvidenceSourceInput } from "../evidence/source-normalizer.js";
 import type { AgendaContract } from "../agenda/agenda-contract.js";
 import { dedupeByContentSimilarity, dedupeSourcesByCanonicalUrl } from "./source-deduper.js";
-import { enrichSources, enrichSource, type EnrichedSource, type SourceEnrichmentOptions } from "./source-enrichment.js";
+import { enrichSources, enrichSource, buildEnriched, type EnrichedSource, type SourceEnrichmentOptions } from "./source-enrichment.js";
 import { filterSourcesForAgenda } from "./source-filter.js";
 import { scoreSourceForAgenda } from "./source-scoring.js";
 import { RetrievalError, runSearchPlan, type RawSearchResult, type SearchExecutionOptions } from "./search-executor.js";
@@ -11,13 +11,14 @@ import type { BucketedQueryPlan } from "./query-planner.js";
 import { logger } from "../../lib/logger.js";
 import { multiKeyFetch } from "../../lib/multi-key-fetch.js";
 import type { SourceBucketId } from "./source-buckets.js";
-import { buildMultiHopExpansion } from "./multi-hop-expander.js";
-import { shouldStopRetrievalEarly } from "./early-stopping.js";
+import { buildMultiHopExpansion, hopBatchNovelty, multiHopCap, orderedMultiHopQueries, shouldStopOnLowNovelty } from "./multi-hop-expander.js";
+import { computeEvidenceScore, shouldStopRetrievalEarly } from "./early-stopping.js";
 import { buildTopicAwareTopUpQuery } from "./query-planning/top-up-query-builder.js";
 import { createExtractionCooldown } from "../providers/limits/extraction-cooldown.js";
 import { retrievalCacheManager } from "../retrieval-cache/index.js";
 import { shortHash } from "../retrieval-cache/retrieval-cache-key.js";
 import { redactSecretString } from "../security/secret-redaction.js";
+import type { ResearchAngle } from "../archive/research-angle-engine.js";
 
 export interface BucketCoverageItem {
   bucketId: SourceBucketId;
@@ -55,6 +56,11 @@ export interface RetrievalSource extends RawSearchResult {
   discoveredBy?: string[];
   citationEligible?: boolean;
   limitations?: string[];
+  /** Preserved from enrichSource so registry/generation keep real chunks (live: 45/45 empty topChunks). */
+  enrichmentCard?: EnrichedSource["enrichmentCard"];
+  sourceChunks?: EnrichedSource["sourceChunks"];
+  limitedSource?: boolean;
+  citationStrength?: EnrichedSource["citationStrength"];
 }
 
 export interface BucketedRetrievalResult {
@@ -82,6 +88,7 @@ export interface BucketedRetrievalOptions extends SearchExecutionOptions {
   enrichFetchFn?: typeof fetch;
   extractionTimeoutMs?: number;
   enrichmentBudgetMs?: number;
+  researchAngles?: ResearchAngle[];
   emit?: (event: { type: string; data?: Record<string, unknown> }) => void;
 }
 
@@ -139,7 +146,8 @@ export async function runBucketedRetrieval(plan: BucketedQueryPlan, options: Buc
   mergedOptions.emit?.({ type: "source_dedup_completed", data: { input: rawResults.length, kept: dedupedResults.length } });
 
   const initialFilter = filterSourcesForAgenda(dedupedResults, plan.agendaContract, { withReasons: true });
-  const filteredResults = initialFilter.kept;
+  // Spend enrichment budget on highest-agenda-score candidates first.
+  const filteredResults = [...initialFilter.kept].sort((a, b) => b.score - a.score || a.url.localeCompare(b.url));
   const filterRejections = initialFilter.rejected.map((item) => ({
     reason: item.reason,
     detail: item.detail,
@@ -152,16 +160,50 @@ export async function runBucketedRetrieval(plan: BucketedQueryPlan, options: Buc
   let topUpAttempts: BucketedRetrievalResult["topUpAttempts"] = [];
   const initialCoverage = coverageFor(plan, rawResults, filteredResults, []);
   const weakForTopup = bucketsNeedingTopup(plan, initialCoverage, filteredResults.length, mergedOptions.minCitationEligibleSources);
+  const mode = mergedOptions.mode ?? "deep_research";
+  const evidenceSources = filteredResults.map((source) => ({
+    bucketIds: source.bucketIds,
+    extractionQuality: source.extractionQuality,
+    citationEligible: source.citationEligible,
+  }));
+  const evidenceScore = computeEvidenceScore(evidenceSources, { targetScore: mergedOptions.minCitationEligibleSources });
   const earlyStop = shouldStopRetrievalEarly({
-    mode: mergedOptions.mode ?? "deep_research",
-    citationEligibleSources: filteredResults.filter((source) => source.citationEligible).length,
+    mode,
+    evidenceScore,
+    evidenceSources,
     coveredBucketIds: [...new Set(filteredResults.flatMap((source) => source.bucketIds))],
-    finalCitationsRealistic: filteredResults.filter((source) => source.citationEligible).length >= mergedOptions.minFinalUniqueCitedSources,
+    finalCitationsRealistic: evidenceScore >= mergedOptions.minFinalUniqueCitedSources
+      || filteredResults.filter((source) => source.citationEligible).length >= mergedOptions.minFinalUniqueCitedSources,
     criticalMissingBucketIds: plan.agendaContract.requiredSourceBuckets
       .map((bucket) => bucket.bucketId)
       .filter((bucketId) => initialCoverage.some((coverage) => coverage.bucketId === bucketId && coverage.kept === 0)),
   });
-  if (earlyStop.stop) mergedOptions.emit?.({ type: "latency_early_stop", data: { reason: earlyStop.reason } });
+  if (earlyStop.stop) mergedOptions.emit?.({ type: "latency_early_stop", data: { reason: earlyStop.reason, evidenceScore } });
+
+  const enrichmentBudgetMs = mergedOptions.enrichmentBudgetMs
+    ?? readPositiveIntegerEnv("RESEARCH_ENRICHMENT_BUDGET_MS")
+    ?? RESEARCH_LIMITS[mergedOptions.mode ?? "deep_research"].enrichmentBudgetMs;
+  const bucketsById = new Map(plan.buckets.map((bucket) => [bucket.id, bucket]));
+  // P1-5: start enriching top-scored URLs while top-up / multi-hop continue.
+  const earlyEnrichTargets = filteredResults.slice(0, mergedOptions.maxSourcesToEnrich);
+  const enrichAbort = new AbortController();
+  const abortEnrichOnParent = () => enrichAbort.abort();
+  if (mergedOptions.abortSignal?.aborted) enrichAbort.abort();
+  mergedOptions.abortSignal?.addEventListener("abort", abortEnrichOnParent, { once: true });
+  let earlyEnrichPromise: Promise<{ enrichedBase: EnrichedSource[]; results: RetrievalSource[] }> | null = null;
+  if (!earlyStop.stop && earlyEnrichTargets.length > 0) {
+    mergedOptions.emit?.({ type: "source_enrichment_started", data: { total: earlyEnrichTargets.length, overlapped: true } });
+    earlyEnrichPromise = enrichRetrievalBatch({
+      sources: earlyEnrichTargets,
+      mergedOptions: { ...mergedOptions, abortSignal: enrichAbort.signal },
+      cacheEvent,
+      enrichmentFailures,
+      enrichmentBudgetMs,
+      bucketsById,
+    });
+  }
+
+  // Top-up when required buckets are weak — not solely on raw aggregate count.
   const shouldTopUp = !earlyStop.stop
     && !retrievalFailed
     && weakForTopup.length > 0
@@ -189,50 +231,57 @@ export async function runBucketedRetrieval(plan: BucketedQueryPlan, options: Buc
     rawResults.push(...topupRaw);
   }
 
-  // Multi-hop expansion: case/index/entity/contrarian query expansion.
-  // Originally gated to deep_research/council only, which left fast_research
-  // with no recovery path beyond contextual bucket top-up when buckets came
-  // back weak. Per LOVABLE_RESEARCH_MODE_REQUIREMENTS_AND_FIX_BRIEF.md
-  // §"Deep Research" + §"Retrieval and Search", deep must consistently hit
-  // its 80-source target. Enable multi-hop for deep_research as well, but
-  // cap expansion size to keep provider spend modest. Still gated by
-  // earlyStop.stop so it won't run if deep already met its target.
+  // Multi-hop: case/entity → contrarian → index; caps deep=10 / council=25; novelty gate.
   const expansionModes: ResearchMode[] = ["deep_research", "council"];
-  if (!earlyStop.stop && expansionModes.includes(mergedOptions.mode ?? "deep_research")) {
+  if (!earlyStop.stop && !retrievalFailed && expansionModes.includes(mergedOptions.mode ?? "deep_research")) {
     const expansion = buildMultiHopExpansion({
       round1Results: filteredResults,
       agendaContract: plan.agendaContract,
       weakBuckets: weakForTopup,
-      researchAngles: [],
+      researchAngles: mergedOptions.researchAngles ?? [],
+      mode: mergedOptions.mode,
     });
-    const expansionCap = mergedOptions.mode === "council" ? 30 : 20;
-    const expansionQueryGroups = [
-      expansion.caseQueries,
-      expansion.indexQueries,
-      expansion.entityQueries,
-      expansion.contrarianQueries,
-    ];
-    const expansionQueries: typeof expansion.caseQueries = [];
-    for (let index = 0; expansionQueries.length < expansionCap; index += 1) {
-      let added = false;
-      for (const group of expansionQueryGroups) {
-        const query = group[index];
-        if (!query) continue;
-        expansionQueries.push(query);
-        added = true;
-        if (expansionQueries.length >= expansionCap) break;
-      }
-      if (!added) break;
-    }
-    if (!retrievalFailed && expansionQueries.length > 0) {
+    const expansionCap = multiHopCap(mergedOptions.mode);
+    const expansionQueries = orderedMultiHopQueries(expansion, expansionCap);
+    if (expansionQueries.length > 0) {
       mergedOptions.emit?.({ type: "multi_hop_expansion_started", data: { queries: expansionQueries.length } });
-      const expansionRaw = await runSearchPlan({ ...plan, queries: expansionQueries }, {
-        ...mergedOptions,
-        onProviderError: (error) => providerErrors.push(error),
-        onCacheEvent: cacheEvent,
-      });
-      rawResults.push(...expansionRaw);
-      mergedOptions.emit?.({ type: "multi_hop_expansion_completed", data: { queries: expansionQueries.length, rawResults: expansionRaw.length } });
+      const batchSize = Math.max(2, Math.ceil(expansionQueries.length / 3));
+      const noveltyWindow: number[] = [];
+      let priorForNovelty = [...filteredResults];
+      let ranQueries = 0;
+      for (let offset = 0; offset < expansionQueries.length; offset += batchSize) {
+        const batch = expansionQueries.slice(offset, offset + batchSize);
+        const expansionRaw = await runSearchPlan({ ...plan, queries: batch }, {
+          ...mergedOptions,
+          onProviderError: (error) => providerErrors.push(error),
+          onCacheEvent: cacheEvent,
+        });
+        rawResults.push(...expansionRaw);
+        ranQueries += batch.length;
+        const batchShaped = scoreAndShape(expansionRaw, plan);
+        const novelty = hopBatchNovelty(priorForNovelty, batchShaped);
+        noveltyWindow.push(novelty);
+        priorForNovelty = dedupeSourcesByCanonicalUrl([...priorForNovelty, ...batchShaped]);
+        if (shouldStopOnLowNovelty(noveltyWindow)) {
+          mergedOptions.emit?.({ type: "multi_hop_novelty_stop", data: { noveltyWindow, ranQueries } });
+          break;
+        }
+        // Mid-flight early-stop: cancel pending enrich if score target hit.
+        const midScore = computeEvidenceScore(
+          priorForNovelty.map((source) => ({
+            bucketIds: source.bucketIds,
+            extractionQuality: source.extractionQuality,
+            citationEligible: source.citationEligible,
+          })),
+          { targetScore: mergedOptions.minCitationEligibleSources },
+        );
+        if (midScore >= mergedOptions.minFinalUniqueCitedSources) {
+          enrichAbort.abort();
+          mergedOptions.emit?.({ type: "latency_early_stop", data: { reason: "multi_hop_score_met", evidenceScore: midScore } });
+          break;
+        }
+      }
+      mergedOptions.emit?.({ type: "multi_hop_expansion_completed", data: { queries: ranQueries, rawResults: rawResults.length } });
     }
   }
 
@@ -246,22 +295,54 @@ export async function runBucketedRetrieval(plan: BucketedQueryPlan, options: Buc
     title: item.source.title,
     url: item.source.url,
   }));
-  const toEnrich = refiltered.slice(0, mergedOptions.maxSourcesToEnrich);
-  mergedOptions.emit?.({ type: "source_enrichment_started", data: { total: toEnrich.length } });
-  const enrichmentBudgetMs = mergedOptions.enrichmentBudgetMs
-    ?? readPositiveIntegerEnv("RESEARCH_ENRICHMENT_BUDGET_MS")
-    ?? RESEARCH_LIMITS[mergedOptions.mode ?? "deep_research"].enrichmentBudgetMs;
-  const bucketsById = new Map(plan.buckets.map((bucket) => [bucket.id, bucket]));
-  const initialEnrichment = await enrichRetrievalBatch({
-    sources: toEnrich,
-    mergedOptions,
-    cacheEvent,
-    enrichmentFailures,
-    enrichmentBudgetMs,
-    bucketsById,
-  });
-  let enrichedResults = initialEnrichment.results;
-  let enrichedBase = initialEnrichment.enrichedBase;
+
+  let earlyEnrichment: { enrichedBase: EnrichedSource[]; results: RetrievalSource[] } = {
+    enrichedBase: [],
+    results: [],
+  };
+  if (earlyEnrichPromise) {
+    try {
+      earlyEnrichment = await earlyEnrichPromise;
+    } catch (error) {
+      // Abort must stop the run. Any other throw keeps search rows already in hand
+      // instead of replacing the retrieval with an empty source list.
+      if (isAbortError(error) || mergedOptions.abortSignal?.aborted) throw error;
+      if (rawResults.length > 0 || refiltered.length > 0) {
+        earlyEnrichment = { enrichedBase: [], results: [] };
+      } else {
+        throw error;
+      }
+    }
+  }
+  mergedOptions.abortSignal?.removeEventListener("abort", abortEnrichOnParent);
+
+  const enrichedByUrl = new Map(earlyEnrichment.results.map((source) => [enrichedMergeKey(source), source]));
+  const toEnrichExtra = refiltered
+    .filter((source) => !enrichedByUrl.has(enrichedMergeKey(source)))
+    .slice(0, Math.max(0, mergedOptions.maxSourcesToEnrich - enrichedByUrl.size));
+  if (!earlyEnrichPromise && refiltered.length > 0) {
+    mergedOptions.emit?.({ type: "source_enrichment_started", data: { total: refiltered.slice(0, mergedOptions.maxSourcesToEnrich).length } });
+  }
+  const extraEnrichment = toEnrichExtra.length > 0
+    ? await enrichRetrievalBatch({
+      sources: toEnrichExtra,
+      mergedOptions,
+      cacheEvent,
+      enrichmentFailures,
+      enrichmentBudgetMs,
+      bucketsById,
+    })
+    : { enrichedBase: [] as EnrichedSource[], results: [] as RetrievalSource[] };
+
+  // Merge: prefer enriched versions; skip re-enrich.
+  const mergedEnriched = new Map<string, RetrievalSource>();
+  for (const source of [...earlyEnrichment.results, ...extraEnrichment.results]) {
+    mergedEnriched.set(enrichedMergeKey(source), source);
+  }
+  let enrichedResults = refiltered
+    .slice(0, mergedOptions.maxSourcesToEnrich)
+    .map((source) => mergedEnriched.get(enrichedMergeKey(source)) ?? source);
+  let enrichedBase = [...earlyEnrichment.enrichedBase, ...extraEnrichment.enrichedBase];
   let extractionProviderBreakdown = countBy(enrichedBase.map((source) => source.extractionProvider ?? source.extractionMethod));
   mergedOptions.emit?.({ type: "source_enrichment_completed", data: {
     enriched: enrichedResults.length,
@@ -269,6 +350,7 @@ export async function runBucketedRetrieval(plan: BucketedQueryPlan, options: Buc
     extractionProvidersUsed: Object.keys(extractionProviderBreakdown),
     extractionProviderBreakdown,
     fallbackExtractionCount: extractionProviderBreakdown.snippet_fallback ?? 0,
+    overlapped: Boolean(earlyEnrichPromise),
   } });
 
   let citationEligibleEstimate = countRegistryEligibleSources(enrichedResults);
@@ -448,17 +530,52 @@ function sanitizeContextEntity(match: string): string | null {
   return cleaned.length >= 3 ? cleaned : null;
 }
 
+export function inferredBucketIdsForClass(sourceClass: string | undefined): SourceBucketId[] {
+  switch (sourceClass) {
+    case "indian_major_media":
+      return ["indian_major_media"];
+    case "general_media":
+      return [];
+    case "official_government":
+      return ["government_official"];
+    case "parliamentary_records":
+      return ["parliamentary_records"];
+    case "court_primary":
+    case "legal_commentary":
+      return ["court_legal"];
+    case "electoral_body":
+      return ["electoral_integrity"];
+    case "policy_research":
+      return ["policy_research"];
+    case "academic_journal":
+      return ["academic_research"];
+    case "human_rights_watchdog":
+      return ["human_rights_watchdog"];
+    case "press_freedom_index":
+      return ["press_freedom"];
+    case "digital_rights_watchdog":
+      return ["digital_rights"];
+    default:
+      return [];
+  }
+}
+
+export function mergeBucketIds(queryBucket: SourceBucketId, sourceClass: string): SourceBucketId[] {
+  return [...new Set([...inferredBucketIdsForClass(sourceClass), queryBucket])] as SourceBucketId[];
+}
+
 function scoreAndShape(rawResults: RawSearchResult[], plan: BucketedQueryPlan): RetrievalSource[] {
   return rawResults.map((source): RetrievalSource => {
     const score = scoreSourceForAgenda(source, plan.agendaContract);
     return {
       ...source,
-      bucketIds: [source.bucketId],
+      // class-inferred primary so coverage and concentration agree
+      bucketIds: mergeBucketIds(source.bucketId, score.sourceClass),
       foundByQueries: [source.foundByQuery],
       score: score.score,
       sourceClass: score.sourceClass,
       scoreReasons: score.reasons,
-      citationEligible: score.score >= 40,
+      citationEligible: false,
     };
   });
 }
@@ -488,14 +605,25 @@ function readPositiveIntegerEnv(name: string): number | undefined {
 function bucketsNeedingPostEnrichmentTopup(plan: BucketedQueryPlan, enrichedResults: RetrievalSource[], target: number): SourceBucketId[] {
   const requiredBucketIds = plan.agendaContract.requiredSourceBuckets.map((bucket) => bucket.bucketId as SourceBucketId);
   const candidateBucketIds = requiredBucketIds.length ? requiredBucketIds : plan.buckets.map((bucket) => bucket.id);
-  const perBucketTarget = Math.max(2, Math.ceil(target / Math.max(1, Math.min(candidateBucketIds.length, 8))));
-  return candidateBucketIds
+  const ranked = candidateBucketIds
     .map((bucketId) => ({
       bucketId,
       eligible: enrichedResults.filter((source) => isRegistryCitationEligible(source) && source.bucketIds.includes(bucketId)).length,
     }))
-    .sort((left, right) => left.eligible - right.eligible)
-    .filter((item, index) => item.eligible < perBucketTarget || index < 3)
+    .sort((left, right) => left.eligible - right.eligible);
+  // Repair on required-bucket deficits (eligible < 2), not raw aggregate alone.
+  const deficits = ranked.filter((item) => item.eligible < 2).map((item) => item.bucketId);
+  if (deficits.length > 0) return deficits.slice(0, 8);
+  const aggregateEligible = countRegistryEligibleSources(enrichedResults);
+  // Live fast_research: 35 eligible across well-stocked buckets skipped repair because every
+  // bucket already met perBucketTarget (ceil(40/5)=8) while aggregate stayed under 40.
+  if (aggregateEligible < target) {
+    return ranked.map((item) => item.bucketId).slice(0, 8);
+  }
+  // Fallback: weakest required buckets still below a fair per-bucket share.
+  const perBucketTarget = Math.max(2, Math.ceil(target / Math.max(1, Math.min(candidateBucketIds.length, 8))));
+  return ranked
+    .filter((item) => item.eligible < perBucketTarget)
     .map((item) => item.bucketId)
     .slice(0, 8);
 }
@@ -504,7 +632,29 @@ function countRegistryEligibleSources(sources: RetrievalSource[]): number {
   return sources.filter(isRegistryCitationEligible).length;
 }
 
+
+async function snippetFallbackEnriched(
+  source: { title: string; url: string; domain: string; snippet?: string },
+  error: string,
+  options: SourceEnrichmentOptions,
+): Promise<EnrichedSource> {
+  const text = source.snippet?.trim() ? source.snippet : null;
+  return buildEnriched(source, {
+    url: source.url,
+    title: source.title,
+    text,
+    extractionMethod: text ? "snippet_fallback" : "failed",
+    extractionProvider: text ? "snippet_fallback" : undefined,
+    extractionStatus: text ? "partial" : "failed",
+    fallbackExtractionUsed: Boolean(text),
+    error,
+  }, options);
+}
+
 function isRegistryCitationEligible(source: RetrievalSource): boolean {
+  // Do not pass agenda relevance score as authorityScore — short-snippet
+  // penalties on high-authority domains (e.g. indian_major_media 78-18=60)
+  // falsely fail the registry authority floor. Class-based authority is used.
   const normalized = normalizeEvidenceSourceInput({
     title: source.title,
     url: source.url,
@@ -512,7 +662,6 @@ function isRegistryCitationEligible(source: RetrievalSource): boolean {
     domain: source.domain,
     bucketIds: source.bucketIds,
     sourceClass: source.sourceClass,
-    authorityScore: source.score,
     fullText: source.fullText ?? null,
     snippet: source.snippet ?? null,
     extractionQuality: source.extractionQuality,
@@ -546,7 +695,7 @@ async function enrichRetrievalBatch(args: {
       scrapingbeeKey: args.mergedOptions.providerKeys?.scrapingbee ?? process.env.SCRAPINGBEE_API_KEY,
       geekflareKey: args.mergedOptions.providerKeys?.geekflare ?? process.env.GEEKFLARE_API_KEY,
       fetchFn: args.mergedOptions.enrichFetchFn,
-      timeoutMs: args.mergedOptions.extractionTimeoutMs ?? 6000,
+      timeoutMs: args.mergedOptions.extractionTimeoutMs ?? 10000,
       concurrency: enrichmentConcurrencyForMode(args.mergedOptions.mode ?? "deep_research", {
         hasJinaKey: Boolean(args.mergedOptions.providerKeys?.jina ?? process.env.JINA_API_KEY ?? process.env.JINA_KEY),
         hasScraperApiKey: Boolean(args.mergedOptions.providerKeys?.scraperapi ?? process.env.SCRAPERAPI_KEY),
@@ -578,6 +727,15 @@ async function enrichRetrievalBatch(args: {
     const hasRequiredFullText = !fullTextRequired
       || (Boolean(enriched.fullText?.trim()) && (extractionQuality === "full" || extractionQuality === "partial"));
     const hasNonFullTextRequiredBucket = source.bucketIds.some((bucketId) => !args.bucketsById.get(bucketId)?.fullTextRequired);
+    // Substantive weak snippets already approved by computeCitationEligibility should not be
+    // double-killed solely because the bucket prefers full text — keep them limited/weak.
+    const weakSnippetPassthrough = Boolean(
+      enriched.citationEligible
+      && enriched.limitedSource
+      && enriched.fullText?.trim()
+      && (enriched.extractionMethod === "snippet_fallback" || extractionQuality === "snippet"),
+    );
+    const passesFullTextGate = hasRequiredFullText || hasNonFullTextRequiredBucket || weakSnippetPassthrough;
     return {
       ...source,
       canonicalUrl: enriched.canonicalUrl ?? source.url,
@@ -587,7 +745,11 @@ async function enrichRetrievalBatch(args: {
       extractionProvider: enriched.extractionProvider,
       extractionStatus: enriched.extractionStatus,
       fallbackExtractionUsed: enriched.fallbackExtractionUsed,
-      citationEligible: Boolean(enriched.citationEligible && source.score >= 40 && (hasRequiredFullText || hasNonFullTextRequiredBucket)),
+      citationEligible: Boolean(enriched.citationEligible && source.score >= 40 && passesFullTextGate),
+      enrichmentCard: enriched.enrichmentCard,
+      sourceChunks: enriched.sourceChunks,
+      limitedSource: enriched.limitedSource,
+      citationStrength: enriched.citationStrength,
       limitations: [
         ...(enriched.enrichmentError ? [`Enrichment failed: ${enriched.enrichmentError}`] : []),
         ...(enriched.extractionMethod === "snippet_fallback" ? ["Snippet-only source; verify before precise use."] : []),
@@ -609,8 +771,12 @@ export async function withEnrichmentBudget<T extends { title: string; url: strin
   let cursor = 0;
   const workerCount = Math.max(1, Math.min(options.concurrency ?? 5, sources.length || 1));
   const controller = new AbortController();
-  const abortFromParent = () => controller.abort();
-  if (options.abortSignal?.aborted) controller.abort();
+  const abortFromParent = () => {
+    const reason = options.abortSignal?.reason;
+    if (reason instanceof Error) controller.abort(reason);
+    else controller.abort(Object.assign(new Error("The operation was aborted"), { name: "AbortError" }));
+  };
+  if (options.abortSignal?.aborted) abortFromParent();
   options.abortSignal?.addEventListener("abort", abortFromParent, { once: true });
   const enrichmentOptions = { ...options, abortSignal: controller.signal };
   const providerHealthScope = extractionProviderHealthScope(options);
@@ -639,40 +805,14 @@ export async function withEnrichmentBudget<T extends { title: string; url: strin
       const index = cursor;
       cursor += 1;
       if (sources[index]) {
-        results[index] = await enrichSource(sources[index], enrichmentOptions).catch((error) => {
+        results[index] = await enrichSource(sources[index], enrichmentOptions).catch(async (error) => {
+          if (isAbortError(error) || options.abortSignal?.aborted) throw error;
           const safeError = redactSecretString(error instanceof Error ? error.message : String(error));
           options.onError?.(safeError);
-          // FIX BUG-4: Check if abort was the cause
-          if (controller.signal.aborted && error instanceof Error && error.message.includes("budget exceeded")) {
-            return {
-              title: sources[index].title,
-              url: sources[index].url,
-              domain: sources[index].domain,
-              fullText: sources[index].snippet ?? null,
-              snippet: sources[index].snippet ?? null,
-              textLength: sources[index].snippet?.length ?? 0,
-              extractionMethod: "snippet_fallback" as const,
-              extractionStatus: "partial" as const,
-              fallbackExtractionUsed: true,
-              extractionQuality: "low" as const,
-              citationEligible: false,
-              enrichmentError: "Enrichment budget exceeded",
-            };
-          }
-          return {
-            title: sources[index].title,
-            url: sources[index].url,
-            domain: sources[index].domain,
-            fullText: sources[index].snippet ?? null,
-            snippet: sources[index].snippet ?? null,
-            textLength: sources[index].snippet?.length ?? 0,
-            extractionMethod: "snippet_fallback" as const,
-            extractionStatus: "partial" as const,
-            fallbackExtractionUsed: true,
-            extractionQuality: "low" as const,
-            citationEligible: false,
-            enrichmentError: safeError,
-          };
+          const reason = controller.signal.aborted && error instanceof Error && error.message.includes("budget exceeded")
+            ? "Enrichment budget exceeded"
+            : safeError;
+          return snippetFallbackEnriched(sources[index], reason, enrichmentOptions);
         });
       }
     }
@@ -680,7 +820,7 @@ export async function withEnrichmentBudget<T extends { title: string; url: strin
   const budgetExceeded = new Promise<void>((resolve) => {
     budgetTimer = setTimeout(() => {
       if (!completed) {
-        controller.abort();
+        controller.abort(new Error("Enrichment aborted: budget exceeded"));
         // Budget exceeded - mark remaining as failed
         for (let i = 0; i < sources.length; i++) {
           if (!results[i] && sources[i]) {
@@ -744,7 +884,38 @@ export async function withEnrichmentBudget<T extends { title: string; url: strin
       };
     }
   }
+  // Rebuild hardcoded ineligible snippet fallbacks through the same eligibility path as enrichSource.
+  await Promise.all(results.map(async (result, index) => {
+    if (!result || !sources[index]) return;
+    const needsRebuild = result.citationEligible === false
+      && (result.extractionMethod === "snippet_fallback" || result.fallbackExtractionUsed)
+      && Boolean(sources[index].snippet?.trim());
+    if (!needsRebuild) return;
+    if (result.enrichmentError !== "Enrichment budget exceeded"
+      && result.enrichmentError !== "Enrichment did not complete before budget cleanup"
+      && !result.enrichmentError) {
+      return;
+    }
+    results[index] = await snippetFallbackEnriched(
+      sources[index],
+      result.enrichmentError || "snippet fallback rebuild",
+      enrichmentOptions,
+    );
+  }));
+  if (options.abortSignal?.aborted) {
+    const reason = options.abortSignal.reason;
+    if (reason instanceof Error) throw reason;
+    throw Object.assign(new Error("The operation was aborted"), { name: "AbortError" });
+  }
   return results;
+}
+
+function enrichedMergeKey(source: { canonicalUrl?: string; url: string }): string {
+  return canonicalizeUrl(source.canonicalUrl ?? source.url).toLowerCase();
+}
+
+function isAbortError(error: unknown): boolean {
+  return Boolean(error) && typeof error === "object" && (error as { name?: string }).name === "AbortError";
 }
 
 function extractionProviderHealthScope(options: SourceEnrichmentOptions): string {

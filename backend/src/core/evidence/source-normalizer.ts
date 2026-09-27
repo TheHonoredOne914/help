@@ -18,18 +18,20 @@ export function normalizeEvidenceSourceInput(raw: RawEvidenceSourceInput): Evide
   const titleOnlyFacts = keyFacts.length > 0 && keyFacts.every((fact) => /^title-only relevance:/i.test(fact.trim()));
   const hasText = text.trim().length > 0;
   const limitedSource = Boolean(raw.limitedSource ?? ((!raw.fullText && !raw.excerpt) || extractionQuality === "snippet" || extractionQuality === "failed"));
-  // Floor aligns with general_media class authority (60).
+  const bucketIds = ((raw.bucketIds?.length ? raw.bucketIds : bucketsFromClassAndDomain(sourceClass, domain)) ?? []) as SourceBucketId[];
+  // Floor aligns with general_media class authority (60); unknown general media without bucket fit stays ineligible.
   const citationEligible = Boolean(raw.citationEligible ?? true)
     && extractionQuality !== "failed"
     && authorityScore >= 60
     && hasText
-    && !(titleOnlyFacts && text.trim().length < 160);
+    && !(titleOnlyFacts && text.trim().length < 160)
+    && !(sourceClass === "general_media" && bucketIds.length === 0 && authorityScore <= 60);
   const base: CompleteEvidenceSourceInput = {
     title: raw.title,
     url: raw.url,
     canonicalUrl: canonicalizeUrl(raw.canonicalUrl ?? raw.url),
     domain,
-    bucketIds: ((raw.bucketIds?.length ? raw.bucketIds : bucketsFromClassAndDomain(sourceClass, domain)) ?? []) as SourceBucketId[],
+    bucketIds,
     sourceClass,
     authorityScore,
     date: raw.date ?? null,
@@ -93,12 +95,19 @@ function normalizeTopChunks(raw: RawEvidenceSourceInput): TopChunk[] {
   const cardTopChunks = Array.isArray(raw.enrichmentCard?.topChunks)
     ? (raw.enrichmentCard.topChunks as unknown[])
     : [];
-  const fromCard = cardTopChunks.map((chunk, index) => ({
-    text: typeof chunk === "string" ? chunk.trim() : "",
-    score: Number(raw.enrichmentCard?.relevanceScore ?? 0),
-    chunkIndex: index,
-    sourceId: raw.id,
-  })).filter((chunk) => chunk.text.length > 0);
+  const fromCard = cardTopChunks.map((chunk, index) => {
+    const text = typeof chunk === "string"
+      ? chunk.trim()
+      : (chunk && typeof chunk === "object" && typeof (chunk as { text?: unknown }).text === "string"
+        ? String((chunk as { text: string }).text).trim()
+        : "");
+    return {
+      text,
+      score: Number(raw.enrichmentCard?.relevanceScore ?? (chunk && typeof chunk === "object" ? (chunk as { score?: number }).score : 0) ?? 0),
+      chunkIndex: index,
+      sourceId: raw.id,
+    };
+  }).filter((chunk) => chunk.text.length > 0);
   const fromRaw = raw.topChunks?.map((chunk) => ({
     text: chunk.text.trim(),
     score: Number.isFinite(chunk.score) ? chunk.score : 0,

@@ -10,6 +10,7 @@ import {
   MODEL_PROVIDERS,
   normalizeProviderModels,
   normalizeProviderStatus,
+  repairSelectedModel,
   STATUS_PROVIDERS,
   type ModelProviderName,
   type ProviderModel,
@@ -20,6 +21,7 @@ import {
   type ProviderStatusMap,
   type ProviderStatusPatch,
 } from "./provider-models";
+import { isKnownUnavailableChatModel } from "@/components/chat/provider-model-display";
 
 export type {
   ModelProviderName,
@@ -31,7 +33,7 @@ export type {
   ProviderStatusMap,
 } from "./provider-models";
 
-const DEFAULT_SELECTED_MODEL = "groq/llama-3.3-70b-versatile";
+const DEFAULT_SELECTED_MODEL = "groq/openai/gpt-oss-120b";
 const PROVIDER_REFRESH_TIMEOUT_MS = 12_000;
 const PROVIDER_MODELS_UPDATED_EVENT = "bestdel:provider-models-updated";
 
@@ -45,19 +47,25 @@ function normalizeStoredSelectedModel(model: string | null | undefined): string 
 }
 
 function emptyModels(): ProviderModels {
-  return { groq: [], openrouter: [], nvidia: [], github: [], gemini: [], ollama: [], cerebras: [] };
+  return { groq: [], openrouter: [], nvidia: [], github: [], gemini: [], ollama: [], cerebras: [], opencode: [] };
+}
+
+function mergeModelList(next: ProviderModel[] | undefined, prev: ProviderModel[]): ProviderModel[] {
+  if (!next || next.length === 0) return prev;
+  return next;
 }
 
 function mergeProviderModels(prev: ProviderModels, patch?: ProviderModelPatch): ProviderModels {
   if (!patch) return prev;
   return {
-    groq: patch.groq ?? prev.groq,
-    openrouter: patch.openrouter ?? prev.openrouter,
-    nvidia: patch.nvidia ?? prev.nvidia,
-    github: patch.github ?? prev.github,
-    gemini: patch.gemini ?? prev.gemini,
-    ollama: patch.ollama ?? prev.ollama,
-    cerebras: patch.cerebras ?? prev.cerebras,
+    groq: mergeModelList(patch.groq, prev.groq),
+    openrouter: mergeModelList(patch.openrouter, prev.openrouter),
+    nvidia: mergeModelList(patch.nvidia, prev.nvidia),
+    github: mergeModelList(patch.github, prev.github),
+    gemini: mergeModelList(patch.gemini, prev.gemini),
+    ollama: mergeModelList(patch.ollama, prev.ollama),
+    cerebras: mergeModelList(patch.cerebras, prev.cerebras),
+    opencode: mergeModelList(patch.opencode, prev.opencode),
   };
 }
 
@@ -74,6 +82,7 @@ function configuredByProvider(keys: ProviderKeys): Record<ProviderName, boolean>
     gemini: Boolean(keys.geminiApiKey.trim()),
     ollama: Boolean(keys.ollamaApiKey.trim() || keys.ollamaBaseUrl.trim()),
     cerebras: Boolean(keys.cerebrasApiKey.trim()),
+    opencode: Boolean(keys.opencodeApiKey.trim()),
     tavily: Boolean(keys.tavilyApiKey.trim()),
     exa: Boolean(keys.exaApiKey.trim()),
     jina: Boolean(keys.jinaApiKey.trim()),
@@ -154,6 +163,7 @@ export function ProviderRuntimeProvider({ children }: { children: ReactNode }) {
     }
   });
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [modelRefreshUnreliable, setModelRefreshUnreliable] = useState(false);
   const [lastRefreshAt, setLastRefreshAt] = useState<number | null>(null);
 
   const setSelectedModel = useCallback((model: string) => {
@@ -281,6 +291,11 @@ export function ProviderRuntimeProvider({ children }: { children: ReactNode }) {
       }
     });
     
+    const refreshFailed = MODEL_PROVIDERS.some((provider) => {
+      const status = nextStatus[provider]?.status;
+      return status === "network_error" || status === "timeout";
+    });
+    setModelRefreshUnreliable(refreshFailed);
     setProviderModels((prev) => mergeProviderModels(prev, nextModels));
     setProviderStatus((prev) => ({ ...prev, ...nextStatus }));
     
@@ -407,7 +422,20 @@ export function ProviderRuntimeProvider({ children }: { children: ReactNode }) {
     };
   }, [refreshAllProviders]);
 
-  const healthyResearchModels = useMemo(() => buildHealthyResearchModels(providerStatus, providerModels), [providerModels, providerStatus]);
+  const healthyResearchModels = useMemo(
+    () => buildHealthyResearchModels(providerStatus, providerModels).filter((model) => !isKnownUnavailableChatModel(model)),
+    [providerModels, providerStatus],
+  );
+
+  useEffect(() => {
+    if (healthyResearchModels.length === 0) return;
+    const llamaRemap = /llama-3\.3-70b-versatile/i.test(selectedModel);
+    if (modelRefreshUnreliable && !llamaRemap) return;
+    const repaired = repairSelectedModel(selectedModel, healthyResearchModels);
+    if (repaired && repaired !== selectedModel) {
+      setSelectedModelState(repaired);
+    }
+  }, [healthyResearchModels, modelRefreshUnreliable, selectedModel]);
 
   const providerErrors = useMemo(() => Object.fromEntries(Object.entries(providerStatus)
     .filter(([, status]) => status.error)

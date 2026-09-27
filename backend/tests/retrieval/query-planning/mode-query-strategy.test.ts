@@ -30,8 +30,8 @@ test("research modes add qualitatively different query text families", () => {
 
   assert.match(fastText, /policy overview/i);
   assert.match(deepText, /recent developments|key arguments/i);
-  assert.match(phdText, /scholarly analysis|statistical data evidence|trend analysis/i);
-  assert.match(fullText, /Treasury Bench Opposition counterarguments|comparative policy analysis|implementation gaps/i);
+  assert.match(phdText, /development trend|policy brief|latest current status update|journal article/i);
+  assert.match(fullText, /Treasury Bench Opposition debate parliament|comparative policy lessons|timeline policy changes/i);
   assert.doesNotMatch(fastText, /scholarly analysis|Treasury Bench Opposition counterarguments/i);
 });
 

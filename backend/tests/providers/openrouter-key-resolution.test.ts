@@ -54,7 +54,7 @@ test("provider status probe uses OPENROUTER_KEY fallback consistently", async ()
     bypassCache: true,
     fetchFn: async (_url, init) => {
       authorization = String(new Headers(init?.headers).get("authorization") ?? "");
-      return new Response(JSON.stringify({ data: [{ id: "openai/gpt-4.1" }] }), { status: 200 }) as any;
+      return new Response(JSON.stringify({ data: [{ id: "qwen/qwen3-32b:free" }] }), { status: 200 }) as any;
     },
   });
 

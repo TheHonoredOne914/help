@@ -99,6 +99,17 @@ const PROVIDER_DEFAULTS: Record<string, ProviderLimitProfile> = {
     fallbackEligible: true,
     dynamic: false,
   },
+  opencode: {
+    providerName: "opencode",
+    safeInputBudget: 27_200,
+    providerMaxInputTokens: 32_000,
+    defaultTimeoutMs: 45_000,
+    preferredTimeoutMs: 60_000,
+    maxRetries: 2,
+    backoffMs: 2_000,
+    fallbackEligible: true,
+    dynamic: true,
+  },
   cerebras: {
     providerName: "cerebras",
     safeInputBudget: 6_800,  // 8000 * 0.85

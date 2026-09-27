@@ -1,5 +1,7 @@
 import type { ModelProvider, ProviderName, ProviderRequest, ProviderResponse } from "./provider-types.js";
+import { redactSecretString } from "../security/secret-redaction.js";
 import { safeProviderError } from "./provider-errors.js";
+import { multiKeyFetch } from "../../lib/multi-key-fetch.js";
 
 export interface OpenAiCompatibleProviderOptions {
   apiKey?: string | null;
@@ -20,7 +22,7 @@ export class OpenAiCompatibleProvider implements ModelProvider {
   async complete(request: ProviderRequest): Promise<ProviderResponse> {
     const apiKey = this.options.apiKey?.trim();
     if (!apiKey) throw safeProviderError(this.name, new Error(this.options.missingKeyMessage));
-    const fetchFn = this.options.fetchFn ?? fetch;
+    const fetchFn = this.options.fetchFn ?? multiKeyFetch;
     const started = Date.now();
     const response = await fetchFn(`${this.options.baseUrl.replace(/\/$/, "")}/chat/completions`, {
       method: "POST",
@@ -101,7 +103,7 @@ export class OpenAiCompatibleProvider implements ModelProvider {
 
 async function safeResponseText(response: Response): Promise<string> {
   try {
-    return (await response.text()).slice(0, 1000);
+    return redactSecretString(await response.text()).slice(0, 1000);
   } catch {
     return "";
   }

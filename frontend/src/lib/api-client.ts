@@ -75,13 +75,35 @@ export const getGetAnthropicConversationQueryKey = (id: number) =>
 
 // ----- List conversations -------------------------------------------------
 
+function timeValue(value: string | Date | undefined): number {
+  const time = value ? new Date(value).getTime() : 0;
+  return Number.isFinite(time) ? time : 0;
+}
+
+function sortConversationsNewestFirst(list: AnthropicConversation[]): AnthropicConversation[] {
+  return [...list].sort((a, b) => {
+    const byDate = timeValue(b.createdAt) - timeValue(a.createdAt);
+    if (byDate !== 0) return byDate;
+    return b.id - a.id;
+  });
+}
+
+function sortMessagesOldestFirst(messages: AnthropicMessage[] | undefined): AnthropicMessage[] | undefined {
+  if (!messages) return messages;
+  return [...messages].sort((a, b) => {
+    const byDate = timeValue(a.createdAt) - timeValue(b.createdAt);
+    if (byDate !== 0) return byDate;
+    return a.id - b.id;
+  });
+}
+
 async function fetchConversations(archiveId?: number | null): Promise<AnthropicConversation[]> {
   const qs = archiveId ? `?archiveId=${archiveId}` : "";
   const res = await apiFetch(`/api/anthropic/conversations${qs}`);
   if (!res.ok) throw new Error(`Failed to load conversations: ${res.status}`);
   const data = await res.json();
-  // Tolerate either {conversations: [...]} or [...] shape.
-  return Array.isArray(data) ? data : (data?.conversations ?? []);
+  const list: AnthropicConversation[] = Array.isArray(data) ? data : (data?.conversations ?? []);
+  return sortConversationsNewestFirst(list);
 }
 
 export function useListAnthropicConversations(archiveId?: number | null) {
@@ -97,7 +119,8 @@ export function useListAnthropicConversations(archiveId?: number | null) {
 async function fetchConversation(id: number): Promise<AnthropicConversation> {
   const res = await apiFetch(`/api/anthropic/conversations/${id}`);
   if (!res.ok) throw new Error(`Failed to load conversation ${id}: ${res.status}`);
-  return res.json();
+  const data = (await res.json()) as AnthropicConversation;
+  return { ...data, messages: sortMessagesOldestFirst(data.messages) };
 }
 
 interface GetConversationOptions {

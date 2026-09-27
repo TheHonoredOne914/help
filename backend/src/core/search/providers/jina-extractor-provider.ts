@@ -1,3 +1,4 @@
+import { multiKeyFetch } from "../../../lib/multi-key-fetch.js";
 import { fetchWithTimeout, redactKnownSecretValues, safeResponseText, statusFromHttp, SearchProviderError } from "../search-provider-errors.js";
 import { assertSafeSourceFetchUrl, buildJinaReaderUrl } from "../../security/source-url-policy.js";
 import type { ExtractorProvider, SearchProviderHealth } from "../search-provider-types.js";
@@ -9,9 +10,10 @@ export const jinaExtractorProvider: ExtractorProvider = {
     const key = keys.jina?.trim();
     if (!key) throw new SearchProviderError("jina", "missing_key", "Jina API key is not configured");
     const started = Date.now();
-    const safeUrl = await assertSafeSourceFetchUrl(url, { resolveDns: (options.fetchFn ?? fetch) === fetch });
+    const fetchFn = options.fetchFn ?? multiKeyFetch;
+    const safeUrl = await assertSafeSourceFetchUrl(url, { resolveDns: fetchFn === fetch || fetchFn === multiKeyFetch });
     const jinaUrl = buildJinaReaderUrl(safeUrl);
-    const response = await fetchWithTimeout(options.fetchFn ?? fetch, jinaUrl, { headers: { Authorization: `Bearer ${key}` }, signal: options.abortSignal }, options.timeoutMs ?? 15000);
+    const response = await fetchWithTimeout(fetchFn, jinaUrl, { headers: { Authorization: `Bearer ${key}` }, signal: options.abortSignal }, options.timeoutMs ?? 15000);
     if (!response.ok) {
       const body = redactKnownSecretValues(await safeResponseText(response), [key]);
       throw new SearchProviderError("jina", statusFromHttp(response.status), `Jina reader failed: ${response.status} ${body}`, response.status);

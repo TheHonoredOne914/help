@@ -62,8 +62,8 @@ export function getPromptBudget(input: {
   const council = input.mode === "council";
   let maxInputTokens = fast ? 24_000 : deep ? 42_000 : council ? 80_000 : 18_000;
   let maxPromptChars = fast ? 84_000 : deep ? 150_000 : council ? 280_000 : 64_000;
-  let maxOutputTokens = fast ? 3_200 : deep ? 5_500 : council ? 8_500 : 5_000;
-  let maxSourcesInPrompt = fast ? 40 : deep ? 80 : council ? 180 : 24;
+  let maxOutputTokens = fast ? 4_200 : deep ? 5_500 : council ? 8_500 : 5_000;
+  let maxSourcesInPrompt = fast ? 40 : deep ? 80 : council ? 110 : 24;
   let maxEvidencePacks = fast ? 10 : deep ? 16 : council ? 24 : 10;
   let maxCardsPerPack = fast ? 4 : deep ? 5 : council ? 8 : 5;
   let maxFactsPerSource = fast ? 1 : deep ? 1 : council ? 1 : 3;
@@ -74,8 +74,11 @@ export function getPromptBudget(input: {
     const largeGroq = input.model.includes("llama-3.3-70b-versatile") || gptOss;
     maxInputTokens = gptOss ? (fast ? 4_200 : deep ? 3_600 : council ? 10_000 : 3_200) : largeGroq ? (fast ? 8_000 : deep ? 6_500 : council ? 10_000 : 5_500) : 4_000;
     maxPromptChars = gptOss ? (fast ? 16_000 : deep ? 13_000 : council ? 36_000 : 12_000) : largeGroq ? (fast ? 28_000 : deep ? 22_000 : council ? 36_000 : 18_000) : 14_000;
-    maxOutputTokens = gptOss ? (fast ? 3_000 : deep ? 3_000 : 2_200) : fast ? 3_000 : deep ? 3_800 : 2_500;
-    maxSourcesInPrompt = fast ? 40 : deep ? 80 : council ? 180 : 24;
+    // Live fast_research (groq gpt-oss): body cut mid-sentence at ~923 prose words
+    // (<1000 floor); markdown tables burn output tokens. Stay inside TPM envelopes:
+    // gpt-oss 4200+3800<=8000, llama-3.3 8000+4000<=12000.
+    maxOutputTokens = gptOss ? (fast ? 3_800 : deep ? 3_000 : 2_200) : fast ? 4_000 : deep ? 3_800 : 2_500;
+    maxSourcesInPrompt = fast ? 40 : deep ? 80 : council ? 110 : 24;
     maxEvidencePacks = fast ? 8 : deep ? 12 : 7;
     maxCardsPerPack = fast ? 2 : deep ? 2 : 3;
     maxFactsPerSource = 1;
@@ -83,17 +86,17 @@ export function getPromptBudget(input: {
     maxInputTokens = fast ? 20_000 : deep ? 42_000 : council ? 80_000 : 18_000;
     maxPromptChars = fast ? 68_000 : deep ? 150_000 : council ? 280_000 : 64_000;
     maxOutputTokens = fast ? 3_200 : deep ? 5_500 : council ? 8_500 : 7_000;
-    maxSourcesInPrompt = fast ? 40 : deep ? 80 : council ? 180 : 24;
+    maxSourcesInPrompt = fast ? 40 : deep ? 80 : council ? 110 : 24;
   } else if (input.providerName === "gemini") {
     maxInputTokens = fast ? 40_000 : deep ? 80_000 : council ? 120_000 : 64_000;
     maxPromptChars = fast ? 140_000 : deep ? 280_000 : council ? 420_000 : 240_000;
     maxOutputTokens = fast ? 3_500 : deep ? 6_000 : council ? 8_500 : 7_000;
-    maxSourcesInPrompt = fast ? 40 : deep ? 80 : council ? 180 : 36;
+    maxSourcesInPrompt = fast ? 40 : deep ? 80 : council ? 110 : 36;
   } else if (input.providerName === "github") {
     maxInputTokens = fast ? 14_000 : deep ? 22_000 : council ? 60_000 : 14_000;
     maxPromptChars = fast ? 46_000 : deep ? 76_000 : council ? 210_000 : 52_000;
     maxOutputTokens = fast ? 2_600 : deep ? 4_200 : council ? 8_000 : 3_000;
-    maxSourcesInPrompt = fast ? 40 : deep ? 80 : council ? 180 : 24;
+    maxSourcesInPrompt = fast ? 40 : deep ? 80 : council ? 110 : 24;
   }
 
   const shrink = Math.min(0.65, compressionLevel * 0.18);

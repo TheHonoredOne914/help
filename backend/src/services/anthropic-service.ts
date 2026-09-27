@@ -3,12 +3,15 @@ import {
   getArchiveContext,
   upsertArchiveContext,
   createMessage,
+  getMessagesByConversationId,
+  updateMessage,
 } from "../db.js";
 import { getGroqClient } from "../lib/groq-client.js";
 import { getOllamaClient } from "../lib/ollama-client.js";
 import { getNvidiaClient } from "../lib/nvidia-client.js";
 import { getGeminiClient, isGeminiEnabled } from "../lib/gemini-client.js";
-import { getCerebrasClient, isCerebrasEnabled } from "../lib/cerebras-client.js";
+import { getCerebrasClient } from "../lib/cerebras-client.js";
+import { getOpenCodeZenClient } from "../lib/opencode-zen-client.js";
 
 import { classifyTopic, type TopicType } from "../lib/rag.js";
 import { verifyAnswer, type VerifyClients } from "../lib/verify.js";
@@ -16,19 +19,14 @@ import { extractKeys, parseProviderModelId } from "../lib/provider-router.js";
 import { createSseWriter } from "../lib/sse.js";
 import type { RequestKeys } from "../lib/types.js";
 import { logger } from "../lib/logger.js";
-import { runResearchPipeline } from "../core/pipeline/research-pipeline.js";
-import type { PipelineEvent, ResearchRunIdentity } from "../core/pipeline/pipeline-events.js";
-import { stripPipelineMetadata } from "../core/pipeline/pipeline-metadata.js";
-import { evaluateSourceContract } from "../core/evidence/source-contract.js";
+import type { ResearchRunIdentity } from "../core/pipeline/pipeline-events.js";
 import { agendaOutputDepthForMode, inferResearchMode } from "../core/config/research-mode.js";
 import { buildAgendaContract } from "../core/agenda/agenda-contract.js";
 import { buildBucketedQueryPlanWithExpansion } from "../core/retrieval/query-planning/build-query-plan.js";
 import { runBucketedRetrieval } from "../core/retrieval/bucketed-retrieval.js";
 import { runCouncilSession } from "../core/council/index.js";
-import { buildResultSnapshot, decideRunTerminalStatus, normalizeProviderError, persistRunSnapshot, selectCanonicalRunTerminalStatus } from "../core/run-state/index.js";
+import { normalizeProviderError } from "../core/run-state/index.js";
 import { TerminalWriteGuard } from "../core/streaming/run-stream/index.js";
-import { getSourceUsagePolicy } from "../core/config/source-usage-policy.js";
-import { buildArchiveContextText } from "./anthropic/archive-context-adapter.js";
 import { buildCoreProviderRouter } from "./anthropic/core-provider-router.js";
 import {
   buildCouncilFinalAnswer,
@@ -38,7 +36,10 @@ import {
 } from "./anthropic/council-render.js";
 import {
   DEFAULT_GROQ_MODEL,
+  GROQ_LIVE_FALLBACK_NATIVE,
+  groqNativeModelFromRequest,
   loadMessageRouteContext,
+  remapUnavailableGroqModelId,
 } from "./anthropic/message-preflight.js";
 import {
   assistantPersistenceStore,
@@ -53,6 +54,7 @@ import {
   normalizeLegacySsePayload,
   type PipelineMetadata,
 } from "./anthropic/pipeline-types.js";
+import { executeResearchRun } from "./anthropic/research-run.js";
 import { ensureResearchWorkerModels } from "./anthropic/worker-models.js";
 import { registerAnthropicEnhanceRoute } from "./anthropic-enhance-route.js";
 import { registerAnthropicMetaRoutes } from "./anthropic-meta-routes.js";
@@ -133,15 +135,23 @@ async function mergeAssistantAnswerIntoArchiveContext(
   const distilled = extractArchiveFacts(answer, topicType);
   if (!distilled) return;
 
-  const currentContext = await getArchiveContext(archiveId);
-
-  const mergedSummary = await mergeArchiveSummaries(
-    currentContext?.summary ?? existingSummary ?? "",
-    distilled,
-    {},
-  );
-
-  await upsertArchiveContext(archiveId, mergedSummary);
+  let base = await getArchiveContext(archiveId);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const seenUpdatedAt = base?.updated_at ?? null;
+    const mergedSummary = await mergeArchiveSummaries(
+      base?.summary ?? existingSummary ?? "",
+      distilled,
+      {},
+    );
+    const latest = await getArchiveContext(archiveId);
+    if ((latest?.updated_at ?? null) !== seenUpdatedAt) {
+      base = latest;
+      if (attempt === 1) return;
+      continue;
+    }
+    await upsertArchiveContext(archiveId, mergedSummary);
+    return;
+  }
 }
 
 export { ensureResearchWorkerModels, buildCoreProviderRouter, __councilTestHooks };
@@ -155,16 +165,19 @@ async function streamGeminiResponse(
   systemPrompt: string,
   messages: { role: "user" | "assistant" | "system"; content: string }[],
   send: (data: Record<string, unknown>) => void,
-  maxOutputTokens = 8192
+  maxOutputTokens = 8192,
+  signal?: AbortSignal,
 ): Promise<string> {
   const stream = await client.chat.completions.create({
     model: modelId,
     max_tokens: maxOutputTokens,
     messages: [{ role: "system", content: systemPrompt }, ...messages.filter(m => m.role !== "system")],
     stream: true,
+    signal,
   });
   let fullResponse = "";
   for await (const chunk of stream) {
+    if (signal?.aborted) break;
     const delta = chunk.choices?.[0]?.delta?.content ?? "";
     if (delta) {
       fullResponse += delta;
@@ -239,6 +252,7 @@ async function handleProviderAllModes(
     openrouterKey?: string | null;
     githubToken?: string | null;
     cerebrasKey?: string | null;
+    opencodeKey?: string | null;
     hfToken?: string | null;
     getIsDisconnected?: () => boolean;
     abortSignal?: AbortSignal;
@@ -311,7 +325,7 @@ Give sharp, specific arguments. Include counter-arguments to anticipate.
   const parsedModel = parseProviderModelId(rawModelId);
   if (parsedModel.prefix === "groq") {
     client = getGroqClient(groqKey);
-    modelId = parsedModel.modelId;
+    modelId = remapUnavailableGroqModelId(parsedModel.modelId);
     providerLabel = "groq";
   } else if (parsedModel.prefix === "ollama") {
     client = getOllamaClient(ollamaKey, ollamaBase);
@@ -335,6 +349,10 @@ Give sharp, specific arguments. Include counter-arguments to anticipate.
     client = getCerebrasClient(opts.cerebrasKey ?? process.env.CEREBRAS_API_KEY);
     modelId = parsedModel.modelId;
     providerLabel = "cerebras";
+  } else if (parsedModel.prefix === "opencode") {
+    client = getOpenCodeZenClient(opts.opencodeKey ?? null);
+    modelId = parsedModel.modelId;
+    providerLabel = "opencode";
   } else {
     client = getNvidiaClient(nvidiaKey);
     modelId = parsedModel.modelId;
@@ -392,7 +410,7 @@ Give sharp, specific arguments. Include counter-arguments to anticipate.
       streamErrorMessage = isRateLimitOrQuotaError(err)
         ? "Provider rate limit or quota stopped the response before completion."
         : err?.status === 404
-          ? `Selected model is unavailable: ${modelId}`
+          ? "This drafting model isn't available. Pick another model in the composer."
           : "Model stream failed before completion.";
       if (isRateLimitOrQuotaError(err)) send({ rateLimited: true });
       else if (err?.status === 404) send({ modelNotPulled: true, modelId });
@@ -413,6 +431,7 @@ Give sharp, specific arguments. Include counter-arguments to anticipate.
             } as PipelineMetadata)
           : null,
       });
+      if (!res.writableEnded) res.end();
       return;
     }
     // Only verify normal mode responses if they look substantive and factual
@@ -516,6 +535,24 @@ After your rebuttal, on a NEW LINE starting with "SUGGESTIONS:", write exactly 3
   }
 }
 
+function rhetoricsTurns(
+  chatHistory: { role: "user" | "assistant"; content: string }[],
+  userQuery: string,
+): { role: "user" | "assistant"; content: string }[] {
+  const recent = chatHistory.slice(-6);
+  const last = recent[recent.length - 1];
+  if (last?.role === "user" && last.content.trim() === userQuery.trim()) return recent;
+  return [...recent, { role: "user", content: userQuery }];
+}
+
+function publishDebateSuggestions(fullText: string, send: (data: Record<string, unknown>) => void): string {
+  const sugMatch = fullText.match(/SUGGESTIONS:\s*(.+)/i);
+  if (!sugMatch || sugMatch.index == null) return fullText;
+  const suggestions = sugMatch[1].split("|").map((s: string) => s.trim()).filter(Boolean).slice(0, 3);
+  if (suggestions.length > 0) send({ suggestions });
+  return fullText.slice(0, sugMatch.index).trimEnd();
+}
+
 export async function streamRhetoricsResponse(
   client: any,
   systemPrompt: string,
@@ -523,49 +560,55 @@ export async function streamRhetoricsResponse(
   userQuery: string,
   temperature: number,
   send: (data: Record<string, unknown>) => void,
-  keys: RequestKeys
+  keys: RequestKeys,
+  modelId = GROQ_LIVE_FALLBACK_NATIVE,
+  abortSignal?: AbortSignal,
 ): Promise<string> {
   let fullText = "";
+  const turns = rhetoricsTurns(chatHistory, userQuery);
   try {
     const stream = await client.chat.completions.create({
-      model: "llama-3.3-70b-versatile",
+      model: remapUnavailableGroqModelId(modelId),
       max_tokens: 1200,
       temperature,
       messages: [
         { role: "system" as const, content: systemPrompt },
-        ...chatHistory.slice(-6),
-        { role: "user" as const, content: userQuery },
+        ...turns,
       ],
       stream: true,
+      signal: abortSignal,
     });
     for await (const chunk of stream) {
+      if (abortSignal?.aborted) break;
       const delta = chunk.choices?.[0]?.delta?.content;
       if (delta) {
         fullText += delta;
         send({ content: delta });
       }
     }
-    // Parse debate suggestions out of fullText if present
-    const sugMatch = fullText.match(/SUGGESTIONS:\s*(.+)/i);
-    if (sugMatch) {
-      const suggestions = sugMatch[1].split("|").map((s: string) => s.trim()).filter(Boolean).slice(0, 3);
-      if (suggestions.length > 0) send({ suggestions });
-    }
-    return fullText;
-  } catch (err: any) {
-    if (keys.geminiKey && isGeminiEnabled(keys.geminiKey)) {
+    return publishDebateSuggestions(fullText, send);
+  } catch (err: unknown) {
+    if (abortSignal?.aborted) return publishDebateSuggestions(fullText, send);
+    if (!fullText && keys.geminiKey && isGeminiEnabled(keys.geminiKey)) {
       const gemini = getGeminiClient(keys.geminiKey);
-      return streamGeminiResponse(
+      const geminiText = await streamGeminiResponse(
         gemini,
         "gemini-2.0-flash",
         systemPrompt,
-        [...chatHistory.slice(-6), { role: "user" as const, content: userQuery }],
+        turns,
         send,
-        1200
+        1200,
+        abortSignal,
       );
+      return publishDebateSuggestions(geminiText, send);
     }
+    if (fullText.trim()) {
+      const error = new Error("Speech generation stopped before completion.") as Error & { partialText?: string };
+      error.partialText = publishDebateSuggestions(fullText, send);
+      throw error;
+    }
+    throw err instanceof Error ? err : new Error("Speech generation failed");
   }
-  return fullText;
 }
 
 async function handleRhetorics(
@@ -580,6 +623,9 @@ async function handleRhetorics(
   archiveContextPrompt = "",
   archiveId?: number,
   archiveSummary?: string,
+  requestedModel?: string,
+  abortSignal?: AbortSignal,
+  isDisconnected?: () => boolean,
 ): Promise<void> {
   const writer = createSseWriter(res);
   const send = (data: Record<string, unknown>) => writer.sendEvent(data);
@@ -589,10 +635,47 @@ async function handleRhetorics(
   ].filter(Boolean).join("\n\n");
   const topic = classifyTopic(userQuery);
   const client = getGroqClient(keys.groqKey);
-  const fullText = await streamRhetoricsResponse(client, systemPrompt, chatHistory, userQuery, temperature, send, keys);
-  if (fullText.trim()) {
-    await createMessage(conversationId, "assistant", fullText);
-    await mergeAssistantAnswerIntoArchiveContext(archiveId, archiveSummary, fullText, topic);
+  const groqModel = groqNativeModelFromRequest(requestedModel);
+  let fullText = "";
+  let failed = false;
+  let failureMessage = "Speech generation didn't return text. Pick another model in the composer, or try again.";
+  try {
+    fullText = await streamRhetoricsResponse(client, systemPrompt, chatHistory, userQuery, temperature, send, keys, groqModel, abortSignal);
+  } catch (err) {
+    failed = true;
+    const partial = (err as { partialText?: string }).partialText;
+    if (typeof partial === "string") fullText = partial;
+    if (err instanceof Error && err.message) failureMessage = err.message;
+    send({ eventType: "provider_error", terminalStatus: "provider_error", error: failureMessage, partial: fullText.trim().length > 0, done: true });
+  }
+  if (failed) {
+    await persistAssistantFailed({
+      store: assistantPersistenceStore,
+      conversationId,
+      title: "Response Failed",
+      message: failureMessage,
+      partialContent: fullText,
+    });
+  } else if (fullText.trim()) {
+    if (req.body?.regenerate === true) {
+      const existing = await getMessagesByConversationId(conversationId);
+      const lastAssistant = [...existing].reverse().find((message) => message.role === "assistant");
+      if (lastAssistant) await updateMessage(lastAssistant.id, { content: fullText });
+      else await createMessage(conversationId, "assistant", fullText);
+    } else {
+      await createMessage(conversationId, "assistant", fullText);
+    }
+    if (!isDisconnected?.()) {
+      await mergeAssistantAnswerIntoArchiveContext(archiveId, archiveSummary, fullText, topic);
+    }
+  } else {
+    await persistAssistantFailed({
+      store: assistantPersistenceStore,
+      conversationId,
+      title: "Response Failed",
+      message: failureMessage,
+    });
+    send({ eventType: "provider_error", terminalStatus: "provider_error", error: failureMessage, done: true });
   }
   writer.finishStream();
 }
@@ -695,7 +778,14 @@ router.post("/anthropic/conversations/:id/messages", async (req, res) => {
   const streamTimeout = setTimeout(() => {
     if (res.writableEnded) return;
     void (async () => {
-      const timeoutMessage = `Request timed out after ${Math.round(STREAM_TIMEOUT_MS / 60000)} minutes`;
+      activeRun.cancelled = true;
+      if (!requestAbortController.signal.aborted) {
+        requestAbortController.abort("stream_timeout");
+      }
+      const timeoutLabel = STREAM_TIMEOUT_MS >= 120_000
+        ? `${Math.round(STREAM_TIMEOUT_MS / 60_000)} minutes`
+        : `${Math.max(1, Math.round(STREAM_TIMEOUT_MS / 1000))} seconds`;
+      const timeoutMessage = `Request timed out after ${timeoutLabel}`;
       await persistAssistantFailed({
         store: assistantPersistenceStore,
         conversationId,
@@ -719,9 +809,11 @@ router.post("/anthropic/conversations/:id/messages", async (req, res) => {
 
   try {
     const isOpenRouter = rawNormalModel.startsWith("openrouter/");
-    if (!(isGroq || isOllama || isNvidia || isGeminiModel || isOpenRouter || isGithubModel)) {
+    const isCerebras = rawNormalModel.startsWith("cerebras/");
+    const isOpenCode = rawNormalModel.startsWith("opencode/");
+    if (!(isGroq || isOllama || isNvidia || isGeminiModel || isOpenRouter || isGithubModel || isCerebras || isOpenCode)) {
       writer.sendTerminalError({
-        error: "Only groq/, ollama/, nvidia/, gemini/, openrouter/, and github/ model prefixes are supported.",
+        error: "Only groq/, ollama/, nvidia/, gemini/, openrouter/, github/, cerebras/, and opencode/ model prefixes are supported.",
         code: "unsupported_model_prefix",
         retryable: false,
       });
@@ -829,7 +921,8 @@ router.post("/anthropic/conversations/:id/messages", async (req, res) => {
         },
       });
       const finalAnswer = buildCouncilFinalAnswer(councilSession, councilRetrieval);
-      const metadata = buildCouncilMetadata(runIdentity, councilSession, councilRetrieval, finalAnswer);
+      const councilQualityGate = __councilTestHooks.runCouncilQualityGate(councilSession, councilRetrieval, finalAnswer, runIdentity);
+      const metadata = buildCouncilMetadata(runIdentity, councilSession, councilRetrieval, finalAnswer, councilQualityGate);
       sendRunEvent("answer_delta", { content: finalAnswer });
       sendRunEvent(councilSession.terminalStatus, {
         done: true,
@@ -842,6 +935,19 @@ router.post("/anthropic/conversations/:id/messages", async (req, res) => {
         citationStatus: metadata.citationStatus,
         sourceContract: metadata.sourceContract,
         sources: metadata.sources,
+        fullSourceManifest: {
+          totalSources: metadata.sources?.length ?? 0,
+          sources: (metadata.sources ?? []).map((source) => ({
+            index: source.sourceId,
+            title: source.title,
+            url: source.url,
+            badge: source.sourceType ?? "WEB",
+            sourceType: source.sourceType ?? "web",
+            score: 0,
+            hasFullContent: false,
+            contentPreview: "",
+          })),
+        },
       });
       if (councilSession.terminalStatus === "cancelled") {
         await persistAssistantFailed({
@@ -850,6 +956,7 @@ router.post("/anthropic/conversations/:id/messages", async (req, res) => {
           assistantMessageId: assistantMessage?.id,
           title: "Council Research Cancelled",
           message: "Council run was cancelled before completion.",
+          partialContent: finalAnswer,
           metadata,
         });
       } else {
@@ -868,347 +975,16 @@ router.post("/anthropic/conversations/:id/messages", async (req, res) => {
     }
 
     if (isResearchRouteMode(routeMode)) {
-      // ── ANSWER GENERATION PROVIDER SELECTION ──────────────────────────────────────
-      // The user's chat model selection (e.g., Groq) controls the UI display and
-      // retrieval role models. However, core answer generation ALWAYS prefers Cerebras
-      // internally (when its API key is configured), because Cerebras has the largest
-      // prompt budget — ideal for the large, evidence-rich prompts the answer generator
-      // builds. If Cerebras fails (key invalid, rate-limited, timeout, etc.), the system
-      // falls back to other registered providers sorted by prompt budget size.
-      // This is by design — the research answer generation is a separate pipeline from
-      // the chat model the user picked in the UI.
-      const userSelectedCoreModel = (effectiveWebModels[0] ?? rawNormalModel) || DEFAULT_GROQ_MODEL;
-      // Build the router with the user-selected model so all providers get registered;
-      // we override providerName/model below to use Cerebras for the primary generation call.
-      const coreProvider = buildCoreProviderRouter(keys, userSelectedCoreModel);
-      const cerebrasAvailable = isCerebrasEnabled(keys.cerebrasKey ?? null);
-      // Override primary generation provider to Cerebras when available
-      const resolvedProviderName = cerebrasAvailable ? "cerebras" as const : coreProvider.providerName;
-      const resolvedModel = cerebrasAvailable ? "llama3.3-70b" : coreProvider.model;
-      req.log?.info?.({
-        event: "research_model_resolved",
-        runId,
-        conversationId,
-        userSelectedCoreModel,
-        resolvedProviderName,
-        resolvedModel,
-        cerebrasOverride: cerebrasAvailable,
-        autoFallback,
-      }, "research model resolved");
-      if (coreProvider.error) {
-        // If Cerebras is available, use it as fallback primary provider even when
-        // the user-selected model's provider is misconfigured (missing key, etc.)
-        if (cerebrasAvailable) {
-          const fallbackProvider = buildCoreProviderRouter(keys, "cerebras/llama3.3-70b");
-          if (!fallbackProvider.error) {
-            Object.assign(coreProvider, fallbackProvider);
-          }
-        }
-        // Still an error after Cerebras fallback attempt
-        if (coreProvider.error) {
-          sendRunEvent("provider_error", {
-            providerError: coreProvider.error,
-            providerConfigurationError: true,
-            coreGenerationMode: "model_required",
-            done: true,
-          });
-          await persistAssistantFailed({
-            store: assistantPersistenceStore,
-            conversationId,
-            assistantMessageId: assistantMessage?.id,
-            title: "Provider Error",
-            message: `Provider configuration error: ${coreProvider.error}`,
-            metadata: buildLegacyTerminalMetadata(runIdentity, "provider_error", {
-              researchMode: effectiveResearchMode,
-              liveRetrievalUsed: true,
-              error: { code: "provider_configuration_error", message: coreProvider.error, recoverable: true },
-            } as PipelineMetadata),
-          });
-          writer.finishStream();
-          return;
-        }
-      }
-      // Track how many tokens were streamed incrementally so we can avoid sending
-      // the full answer again as a batch (which would duplicate content on the frontend).
-      let streamedTokenCount = 0;
-      const pipelineResult = await runResearchPipeline({
-        runId,
-        requestId,
-        conversationId,
-        assistantMessageId: assistantMessage?.id,
-        userQuery: userContent,
-        mode: effectiveResearchMode,
-        archiveText: buildArchiveContextText(archiveTopic, archiveSummary),
-        liveRetrieval: true,
-        allowMockRetrieval: false,
-        allowSyntheticSourceUsage: false,
-        onStream: (chunk: string) => {
-          streamedTokenCount++;
-          sendRunEvent('answer_delta', { content: chunk });
-        },
-        searchOptions: {
-          live: true,
-          allowMock: false,
-          mode: effectiveResearchMode,
-          providerKeys: {
-            tavily: keys.tavilyKey ?? undefined,
-            brave: keys.braveKey ?? undefined,
-            serper: keys.serperKey ?? undefined,
-            exa: keys.exaKey ?? undefined,
-            firecrawl: keys.firecrawlKey ?? undefined,
-            jina: keys.jinaKey ?? undefined,
-            scraperapi: keys.scraperapiKey ?? undefined,
-            zenrows: keys.zenrowsKey ?? undefined,
-            scrapingbee: keys.scrapingbeeKey ?? undefined,
-            geekflare: keys.geekflareKey ?? undefined,
-          },
-          useCache: true,
-        },
-        ...(effectiveResearchMode === "fast_research" ? {} : { generationMode: "model" as const }),
-        providerRouter: coreProvider.router,
-        providerName: resolvedProviderName,
-        model: resolvedModel,
-        userSelectedModels: effectiveWebModels,
-        autoFallback,
+      await executeResearchRun({
+        context: preflight.context,
+        keys,
         signal: requestAbortController.signal,
-        trustRegisteredProvidersWithoutStatus: true,
-        emit: (event: PipelineEvent) => {
-          req.log?.info?.({
-            runId,
-            conversationId,
-            corePipelineEvent: event.type,
-            corePipelineData: event.data ?? {},
-          }, "core research pipeline event");
-          sendRunEvent("core_pipeline_event", {
-            type: "core_pipeline_event",
-            corePipelineEvent: event.type,
-            corePipelineData: event.data ?? {},
-          });
-        },
+        isDisconnected: () => clientDisconnected,
+        sendRunEvent,
+        finishStream: () => writer.finishStream(),
+        logInfo: (obj, msg) => req.log?.info?.(obj, msg),
+        mergeArchive: (finalAnswer) => mergeAssistantAnswerIntoArchiveContext(archiveId, archiveSummary, finalAnswer, classifyTopic(userContent)),
       });
-      const sourceUsagePolicy = getSourceUsagePolicy(effectiveResearchMode);
-      const sourceUsageWarningRoles = pipelineResult.modelRoleOutputs.filter((role) => role.sourceUsageFailureReport);
-      const sourceUsageFailedRoles = pipelineResult.modelRoleOutputs.filter((role) => !role.sourceUsageRequirementSatisfied);
-      const sourceUsageFailureReports = [
-        ...sourceUsageFailedRoles.map((role) => role.sourceUsageFailureReport).filter(Boolean),
-        ...sourceUsageWarningRoles.map((role) => role.sourceUsageFailureReport).filter(Boolean),
-      ];
-      const providerErrors = sourceUsageFailureReports.flatMap((report) => report?.providerErrors ?? []);
-      const citationStatus = {
-        finalUniqueCitedSources: pipelineResult.citationReport.uniqueCitedSourceCount,
-        totalLinkedCitations: pipelineResult.citationReport.linkedCitationCount,
-        citedSourceIds: pipelineResult.citationReport.sourceIdsActuallyUsed,
-        citationCoverage: pipelineResult.evidenceRegistry.getCitationEligibleCount() > 0
-          ? pipelineResult.citationReport.uniqueCitedSourceCount / pipelineResult.evidenceRegistry.getCitationEligibleCount()
-          : 0,
-        invalidCitations: pipelineResult.citationReport.invalidCitations,
-        citedBuckets: pipelineResult.citationReport.citedBuckets,
-      };
-      const strictSourceContract = evaluateSourceContract({
-        mode: effectiveResearchMode,
-        requiredSources: pipelineResult.agendaContract.minimumUniqueCitedSources,
-        citationEligibleSources: pipelineResult.evidenceRegistry.getCitationEligibleCount(),
-        finalUniqueCitedSources: pipelineResult.citationReport.uniqueCitedSourceCount,
-        bucketCoverage: pipelineResult.evidenceRegistry.getBucketCoverage(),
-        requiredBuckets: pipelineResult.agendaContract.requiredSourceBuckets.map((bucket) => bucket.bucketId),
-        sourceGapReport: pipelineResult.sourceGapReport,
-        categoryScores: pipelineResult.qualityGate.categoryScores,
-      });
-      const sourceContract = {
-        ...strictSourceContract,
-        requiredEvidenceCardsPerModel: pipelineResult.agendaContract.minimumEvidenceCardsPerModel,
-        requiredUniqueCitedSources: pipelineResult.agendaContract.minimumUniqueCitedSources,
-        citationEligibleSources: pipelineResult.evidenceRegistry.getCitationEligibleCount(),
-        finalUniqueCitedSources: pipelineResult.citationReport.uniqueCitedSourceCount,
-        passed: strictSourceContract.passed && (!sourceUsagePolicy.strictFailure || sourceUsageFailedRoles.length === 0),
-        completedWithSourceGaps: strictSourceContract.status === "passed_with_source_gaps" || (!sourceUsagePolicy.strictFailure && (sourceUsageFailedRoles.length > 0 || sourceUsageWarningRoles.length > 0)),
-        roles: pipelineResult.modelRoleOutputs.map((role) => ({
-          roleName: role.roleName,
-          sourceCountUsed: role.sourceUsageCount,
-          passed: role.sourceUsageRequirementSatisfied,
-          sourceGapReason: role.failureReason,
-        })),
-      };
-      sendRunEvent("citation_status", { citationStatus });
-      sendRunEvent("source_contract", { sourceContract });
-      sendRunEvent("quality_gate", { coreQualityGate: pipelineResult.qualityGate });
-      const terminalDecision = decideRunTerminalStatus({
-        mode: effectiveResearchMode,
-        coreGenerationUsed: pipelineResult.usedCoreGeneration,
-        legacyFallbackUsed: pipelineResult.usedLegacyFallback,
-        sourceContract: strictSourceContract,
-        sourceGapReport: pipelineResult.sourceGapReport,
-        qualityGate: pipelineResult.qualityGate,
-        citationStatus,
-        sourceUsageFailureReports,
-        fallbackExplicitlyAllowed: false,
-        degradedFallbackUsed: pipelineResult.coreAnswerResult?.degradedFallbackUsed === true,
-        visibleAnswer: pipelineResult.finalAnswer,
-      });
-      const terminalStatus = selectCanonicalRunTerminalStatus(terminalDecision, pipelineResult.terminalStatus);
-      const snapshot = buildResultSnapshot({
-        runIdentity,
-        finalAnswer: terminalDecision.visibleAnswer || stripPipelineMetadata(pipelineResult.finalAnswer).trim(),
-        terminalStatus,
-        errorCode: terminalDecision.errorCode,
-        error: terminalDecision.errorCode
-          ? { code: terminalDecision.errorCode, message: "Final answer was empty after hidden metadata was stripped.", stage: "final_output", retryable: true }
-          : undefined,
-        sources: pipelineResult.evidenceRegistry.sources.map((source) => ({
-          sourceId: source.id,
-          title: source.title,
-          url: source.url,
-          sourceType: source.sourceClass,
-          bucketIds: source.bucketIds,
-          discoveredBy: source.discoveredBy,
-          extractedBy: source.extractedBy,
-          fallbackExtractionUsed: source.fallbackExtractionUsed,
-        })),
-        citationReport: citationStatus,
-        sourceContract: strictSourceContract,
-        sourceGapReport: pipelineResult.sourceGapReport,
-        qualityGateReport: pipelineResult.qualityGate,
-        sourceUsageValidationReports: sourceUsageFailureReports,
-        divisionOutputs: pipelineResult.divisionOutputs,
-        providerRuntime: {
-          providerErrors,
-        },
-        bucketCoverage: pipelineResult.evidenceRegistry.getBucketCoverage(),
-        agenda: {
-          normalizedAgenda: pipelineResult.agendaContract.normalizedAgenda,
-          topicType: pipelineResult.agendaContract.topicType,
-          minimumUniqueCitedSources: pipelineResult.agendaContract.minimumUniqueCitedSources,
-        },
-        degradedFallbackUsed: pipelineResult.coreAnswerResult?.degradedFallbackUsed,
-        legacyFallbackUsed: pipelineResult.usedLegacyFallback,
-        fallbackUsed: pipelineResult.fallbackUsed,
-        fallbackReason: pipelineResult.fallbackReason,
-        fallbackCode: pipelineResult.fallbackCode,
-      });
-      if (terminalStatus === "failed" || terminalStatus === "provider_error") {
-        const failureMessage = sourceUsageFailedRoles.length > 0
-          ? "Source usage validation failed. The model listed sources without extracting/supporting claims."
-          : terminalDecision.errorCode === "EMPTY_FINAL_ANSWER"
-            ? "Final answer was empty after hidden metadata was stripped."
-          : pipelineResult.qualityGate.repairRequired
-            ? "Research quality gate failed after repair."
-            : "Research source contract failed.";
-        await persistAssistantFailed({
-          store: assistantPersistenceStore,
-          conversationId,
-          assistantMessageId: assistantMessage?.id,
-          title: modeAwareFailureTitle(effectiveResearchMode, terminalStatus),
-          message: failureMessage,
-          metadata: {
-            runId,
-            requestId,
-            conversationId,
-            assistantMessageId: assistantMessage?.id,
-            queryHash: runIdentity.queryHash,
-            researchMode: effectiveResearchMode,
-            terminalStatus,
-            coreGenerationUsed: pipelineResult.usedCoreGeneration,
-            legacyFallbackUsed: pipelineResult.usedLegacyFallback,
-            liveRetrievalUsed: true,
-            error: { code: terminalDecision.errorCode ?? "SOURCE_CONTRACT_FAILED", message: failureMessage, recoverable: true },
-            sourceUsageFailureReports,
-            providerErrors,
-            sourceContract: strictSourceContract,
-            sourceGapReport: pipelineResult.sourceGapReport,
-            qualityGate: pipelineResult.qualityGate,
-            citationStatus,
-            citationReport: snapshot.citationReport,
-            divisionOutputs: snapshot.divisionOutputs,
-            qualityGateReport: snapshot.qualityGateReport,
-            sources: snapshot.sources,
-          } as any,
-        });
-        sendRunEvent("failed", {
-          done: true,
-          terminalStatus,
-          code: terminalDecision.errorCode ?? (sourceUsageFailedRoles.length > 0 ? "SOURCE_USAGE_VALIDATION_FAILED" : "SOURCE_CONTRACT_FAILED"),
-          message: failureMessage,
-          retryable: true,
-          sourceContract,
-          sourceGapReport: pipelineResult.sourceGapReport,
-          sourceUsageFailureReports,
-          divisionOutputs: snapshot.divisionOutputs,
-          diagnostics: { citationReport: snapshot.citationReport, qualityGateReport: snapshot.qualityGateReport },
-        });
-        writer.finishStream();
-        return;
-      }
-      // Only send the full answer as a batch if NO tokens were streamed incrementally.
-      // When streaming worked, the frontend already has the complete text from accumulated
-      // answer_delta chunks — sending it again would duplicate the content.
-      if (streamedTokenCount === 0) {
-        sendRunEvent("answer_delta", { content: pipelineResult.finalAnswer });
-      }
-      sendRunEvent("division_outputs", { divisionOutputs: snapshot.divisionOutputs });
-      sendRunEvent(terminalStatus, {
-        done: true,
-        terminalStatus,
-        coreGenerationUsed: pipelineResult.usedCoreGeneration,
-        legacyFallbackUsed: pipelineResult.usedLegacyFallback,
-        liveRetrievalUsed: true,
-        sourceGapReport: pipelineResult.sourceGapReport,
-        sourceUsageFailureReports: sourceUsageWarningRoles.map((role) => role.sourceUsageFailureReport).filter(Boolean),
-        citationReport: snapshot.citationReport,
-        qualityGateReport: snapshot.qualityGateReport,
-        sourceContract: snapshot.sourceContract,
-        divisionOutputs: snapshot.divisionOutputs,
-        sources: snapshot.sources,
-      });
-      const persistedMetadata = {
-        runId,
-        requestId,
-        conversationId,
-        assistantMessageId: assistantMessage?.id,
-        queryHash: runIdentity.queryHash,
-        researchMode: effectiveResearchMode,
-        terminalStatus,
-        coreGenerationUsed: pipelineResult.usedCoreGeneration,
-        legacyFallbackUsed: pipelineResult.usedLegacyFallback,
-        liveRetrievalUsed: true,
-        sourceContract: strictSourceContract,
-        sourceGapReport: pipelineResult.sourceGapReport,
-        qualityGate: pipelineResult.qualityGate,
-        citationStatus,
-        sourceUsageFailureReports,
-        providerErrors,
-        degradedFallbackUsed: pipelineResult.coreAnswerResult?.degradedFallbackUsed,
-        deterministicCitedFallbackUsed: pipelineResult.coreAnswerResult?.deterministicCitedFallbackUsed,
-        citationRepairAttempted: pipelineResult.coreAnswerResult?.citationRepairAttempted,
-        citationRepairSucceeded: pipelineResult.coreAnswerResult?.citationRepairSucceeded,
-        divisionOutputs: snapshot.divisionOutputs,
-        citationReport: snapshot.citationReport,
-        qualityGateReport: snapshot.qualityGateReport,
-        sourceUsageValidationReports: sourceUsageFailureReports,
-        repairPasses: [],
-        bucketCoverage: pipelineResult.evidenceRegistry.getBucketCoverage(),
-        legacyDebug: { mode: effectiveResearchMode, models: [], discussion: null },
-        sources: snapshot.sources,
-      } as any;
-      const persistedContent = embedPipelineMeta(snapshot.finalAnswer, persistedMetadata);
-      if (assistantMessage?.id) {
-        await persistRunSnapshot({
-          store: assistantPersistenceStore,
-          conversationId,
-          assistantMessageId: assistantMessage.id,
-          snapshot,
-        });
-        if (!clientDisconnected) {
-          await maybeMergeArchive({
-            terminalStatus,
-            qualityGate: pipelineResult.qualityGate,
-            legacyFallbackUsed: pipelineResult.usedLegacyFallback,
-            sourceContract: strictSourceContract,
-            finalAnswer: pipelineResult.finalAnswer,
-            merge: () => mergeAssistantAnswerIntoArchiveContext(archiveId, archiveSummary, pipelineResult.finalAnswer, classifyTopic(userContent)),
-          });
-        }
-      }
-      writer.finishStream();
       return;
     }
 
@@ -1225,6 +1001,9 @@ router.post("/anthropic/conversations/:id/messages", async (req, res) => {
         combinedSystemPrompt,
         archiveId ?? undefined,
         archiveSummary,
+        rawNormalModel,
+        requestAbortController.signal,
+        () => clientDisconnected,
       );
       clearTimeout(streamTimeout);
       clearInterval(heartbeatInterval);
@@ -1246,6 +1025,7 @@ router.post("/anthropic/conversations/:id/messages", async (req, res) => {
       openrouterKey: keys.openrouterKey,
       githubToken: keys.githubToken,
       cerebrasKey: keys.cerebrasKey,
+      opencodeKey: keys.opencodeKey,
       hfToken: keys.hfToken,
       getIsDisconnected: () => clientDisconnected,
       abortSignal: requestAbortController.signal,
@@ -1283,12 +1063,14 @@ router.post("/anthropic/conversations/:id/messages", async (req, res) => {
       ? "Source usage validation failed. The model listed sources without extracting/supporting claims."
       : "AI error occurred";
     const recoverable = code === "SOURCE_USAGE_VALIDATION_FAILED" || providerError?.retryable === true;
+    const partialText = (err as { partialText?: string }).partialText;
     await persistAssistantFailed({
       store: assistantPersistenceStore,
       conversationId,
       assistantMessageId: assistantMessage?.id,
       title: modeAwareFailureTitle(effectiveResearchMode, terminalStatus),
       message: `${message}\n\nSuggestions:\n- configure a working model provider\n- use Deep instead of PhD/FullSpectrum\n- reduce source requirement\n- retry`,
+      partialContent: typeof partialText === "string" ? partialText : undefined,
       metadata: {
         runId,
         requestId,

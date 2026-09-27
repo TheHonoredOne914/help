@@ -15,6 +15,33 @@ const strictContract = {
 
 const goodQualityGate = { passed: true, score: 91, repairRequired: false };
 
+test("SourceUsageMap near-miss with SourceGapReport is completed_with_source_gaps not completed", () => {
+  const gapContract = {
+    requiredSources: 40,
+    citationEligibleSources: 42,
+    finalUniqueCitedSources: 40,
+    passedStrict: true, // simulates gap dropped from evaluateSourceContract
+    passedWithSourceGaps: false,
+    passed: true,
+    status: "passed" as const,
+    reason: "Strict target met.",
+  };
+  assert.equal(decideFinalResearchStatus({
+    mode: "fast_research",
+    coreGenerationUsed: true,
+    legacyFallbackUsed: false,
+    sourceContract: gapContract,
+    sourceGapReport: {
+      explanation: "Validated SourceUsageMap covered 39/40 required sources, so the answer must be treated as a source-gap result.",
+    },
+    sourceUsagePassed: false,
+    qualityGate: goodQualityGate,
+    citationStatus: { finalUniqueCitedSources: 40 },
+    sourceUsageFailureReports: [],
+    visibleAnswer: "Parliamentary brief with [Source 1] citations across the debate floor.",
+  }), "completed_with_source_gaps");
+});
+
 test("quality gate failure and repairRequired never become completed", () => {
   assert.equal(decideFinalResearchStatus({
     mode: "deep_research",

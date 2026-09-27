@@ -30,5 +30,7 @@ describe("stage fallback router", () => {
       p !== "firecrawl" && p !== "jina" && p !== "tavily" && p !== "serper" && p !== "exa" && p !== "brave"
     );
     assert.ok(validProviders.length >= 5);
+    assert.equal(validProviders[0], "opencode");
+    assert.equal(validProviders.includes("cerebras"), false);
   });
 });

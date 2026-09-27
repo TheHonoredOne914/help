@@ -26,13 +26,13 @@ export function QualityGatePanel({ gate }: QualityGatePanelProps) {
       "rounded-lg border p-2.5",
       healthy ? "border-emerald-500/25 bg-emerald-500/10" : "border-amber-300/50 bg-amber-500/10",
     )}>
-      <p className={cn("text-[10px] font-semibold", healthy ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300")}>
+      <p className={cn("text-2xs font-semibold", healthy ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300")}>
         Quality Gate
       </p>
-      <p className="mt-1 text-[12px] font-semibold text-foreground">
+      <p className="mt-1 text-sm font-semibold text-[var(--ink)]">
         {healthy ? "Passed" : gate.repairRequired ? "Repair required" : "Failed"}
       </p>
-      <p className="mt-1 text-[10px] text-muted-foreground">
+      <p className="mt-1 text-2xs text-[var(--slate)]">
         Score {gate.score}
         {gate.automaticFailures.length > 0 && `, ${gate.automaticFailures.length} failure${gate.automaticFailures.length !== 1 ? "s" : ""}`}
         {gate.warnings.length > 0 && `, ${gate.warnings.length} warning${gate.warnings.length !== 1 ? "s" : ""}`}
@@ -41,7 +41,7 @@ export function QualityGatePanel({ gate }: QualityGatePanelProps) {
       {allTokens.length > 0 && (
         <ul className="mt-1.5 max-h-20 space-y-0.5 overflow-y-auto">
           {allTokens.map((token, i) => (
-            <li key={i} className="text-[10px] text-muted-foreground">
+            <li key={i} className="text-2xs text-[var(--slate)]">
               {i < failures.length ? (
                 <span className="text-red-600 dark:text-red-400">✕ {token}</span>
               ) : (

@@ -1,5 +1,6 @@
 import { SearchProviderError, statusFromHttp } from "../search-provider-errors.js";
 import { assertSafeSourceFetchUrl } from "../../security/source-url-policy.js";
+import { multiKeyFetch } from "../../../lib/multi-key-fetch.js";
 import type {
   ExtractedPageContent,
   ExtractorOptions,
@@ -50,7 +51,8 @@ export function providerReady(
 }
 
 export async function safeTargetUrl(url: string, options: ExtractorOptions): Promise<URL> {
-  return assertSafeSourceFetchUrl(url, { resolveDns: (options.fetchFn ?? fetch) === fetch });
+  const fetchFn = options.fetchFn ?? multiKeyFetch;
+  return assertSafeSourceFetchUrl(url, { resolveDns: fetchFn === fetch || fetchFn === multiKeyFetch });
 }
 
 export function emptyContentResult(

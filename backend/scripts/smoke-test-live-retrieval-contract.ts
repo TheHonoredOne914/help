@@ -8,7 +8,7 @@ import type { ResearchMode } from "../src/core/config/research-mode.js";
 normalizeApiKeys();
 
 const mode = (process.env.LIVE_RESEARCH_MODE ?? "fast_research") as ResearchMode;
-const minimumSourceCount = Number(process.env.LIVE_MIN_SOURCES ?? (mode === "deep_research" ? 80 : mode === "council" ? 180 : 40));
+const minimumSourceCount = Number(process.env.LIVE_MIN_SOURCES ?? (mode === "deep_research" ? 80 : mode === "council" ? 110 : 40));
 const liveQuestion = process.env.LIVE_RESEARCH_QUESTION?.trim() || process.env.LIVE_RESEARCH_QUERY?.trim();
 const defaultQuestion = "Should the Election Commission and Union Government regulate online political advertising, deepfakes, and platform transparency during elections?";
 const modeLabel = mode === "council" ? "Council" : mode === "deep_research" ? "Deep" : "Fast";

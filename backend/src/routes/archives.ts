@@ -172,9 +172,6 @@ const supabaseArchivesStore: ArchivesStore = {
   async createArchive(input, ownerUserId) {
     try {
       const archive = await createArchiveDb(input.name, input.topic, ownerUserId);
-      void upsertArchiveResearchAngles(archive.id, [], {}).catch((err) => {
-        console.error("[archives] Failed to initialize research angles:", err);
-      });
       return toApiArchive(archive);
     } catch (err) {
       console.error("[archives] createArchive failed:", err);
@@ -239,8 +236,12 @@ export function createArchivesRouter(store: ArchivesStore = supabaseArchivesStor
       const stack = err instanceof Error ? err.stack : undefined;
       console.error("[archives] Failed to create archive:", message);
       if (stack) console.error(stack);
+      const actionable =
+        /Archive tables missing|Cannot reach Supabase|paused|setup-supabase/i.test(message)
+          ? message
+          : "Failed to create archive";
       res.status(500).json({
-        error: "Failed to create archive",
+        error: actionable,
         details: process.env.NODE_ENV === "development" ? message : undefined,
       });
     }

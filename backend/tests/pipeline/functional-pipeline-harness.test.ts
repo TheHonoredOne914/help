@@ -26,8 +26,9 @@ test("functional harness produces an honest terminal status and normalized agend
   });
 
   assert.equal(result.agendaContract.normalizedAgenda, "DPDP Act privacy safeguards India");
-  assert.notEqual(result.terminalStatus, "completed");
-  assert.notEqual(result.terminalStatus, "degraded_fallback");
-  assert.ok(["legacy_fallback_used", "completed_with_source_gaps", "failed"].includes(result.terminalStatus));
+  assert.equal(result.terminalStatus, "failed");
+  assert.equal(result.usedCoreGeneration, false);
+  assert.equal(result.usedLegacyFallback, false);
   assert.ok(result.sourceGapReport);
+  assert.match(result.finalAnswer, /Insufficient Sources/i);
 });

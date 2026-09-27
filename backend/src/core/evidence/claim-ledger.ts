@@ -174,7 +174,7 @@ function findEvidenceSpan(source: EvidenceSource, claimText: string): EvidenceSp
     ? "snippet"
     : source.extractionQuality === "failed"
       ? "failed"
-      : source.keyFacts.every((fact) => /^title-only relevance:/i.test(fact.trim()))
+      : source.keyFacts.length > 0 && source.keyFacts.every((fact) => /^title-only relevance:/i.test(fact.trim()))
         ? "title_only"
         : source.extractionQuality;
   const haystacks = [

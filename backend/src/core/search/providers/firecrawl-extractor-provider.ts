@@ -1,3 +1,4 @@
+import { multiKeyFetch } from "../../../lib/multi-key-fetch.js";
 import { fetchWithTimeout, redactKnownSecretValues, safeResponseText, statusFromHttp, SearchProviderError } from "../search-provider-errors.js";
 import { assertSafeSourceFetchUrl } from "../../security/source-url-policy.js";
 import type { ExtractedPageContent, ExtractorProvider, SearchProviderHealth } from "../search-provider-types.js";
@@ -9,8 +10,9 @@ export const firecrawlExtractorProvider: ExtractorProvider = {
     const key = keys.firecrawl?.trim();
     if (!key) throw new SearchProviderError("firecrawl", "missing_key", "Firecrawl API key is not configured");
     const started = Date.now();
-    const safeUrl = await assertSafeSourceFetchUrl(url, { resolveDns: (options.fetchFn ?? fetch) === fetch });
-    const response = await fetchWithTimeout(options.fetchFn ?? fetch, "https://api.firecrawl.dev/v1/scrape", {
+    const fetchFn = options.fetchFn ?? multiKeyFetch;
+    const safeUrl = await assertSafeSourceFetchUrl(url, { resolveDns: fetchFn === fetch || fetchFn === multiKeyFetch });
+    const response = await fetchWithTimeout(fetchFn, "https://api.firecrawl.dev/v1/scrape", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
       body: JSON.stringify({ url: safeUrl.href, formats: ["markdown"] }),

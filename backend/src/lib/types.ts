@@ -6,7 +6,7 @@
 
 import type { Passage } from "./passage-engine.js";
 
-export type ProviderName = "groq" | "ollama" | "nvidia" | "gemini" | "openrouter" | "github" | "cerebras" | "openai";
+export type ProviderName = "groq" | "ollama" | "nvidia" | "gemini" | "openrouter" | "github" | "cerebras" | "openai" | "opencode";
 
 export type ChatMode = "normal" | "web_search" | "deep_research";
 
@@ -37,6 +37,7 @@ export interface RequestKeys {
   geekflareKey?: string | null;
   cerebrasKey?:   string | null;
   openaiKey?:     string | null;
+  opencodeKey?:   string | null;
 }
 
 /**

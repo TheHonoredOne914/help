@@ -5,16 +5,17 @@ import { buildAgendaContract } from "../../src/core/agenda/agenda-contract.js";
 import { buildClaimGraph } from "../../src/core/evidence/claim-graph.js";
 import { buildEvidencePacks } from "../../src/core/evidence/evidence-pack-builder.js";
 import { buildEvidenceRegistryFromSources } from "../../src/core/evidence/evidence-registry.js";
-import { buildSourceUsageMapFromRegistry } from "../../src/core/evidence/source-usage-map.js";
 import { generateCoreResearchAnswer } from "../../src/core/generation/core-answer-generator.js";
 import type { ProviderRouter } from "../../src/core/providers/provider-router.js";
+import { RESEARCH_LIMITS } from "../../src/core/config/research-mode.js";
+import { buildModeSourceUsageMap } from "../helpers/source-usage-fixtures.js";
 
 test("model-backed core answer path calls provider and validates registry citations", async () => {
   const agendaContract = buildAgendaContract({ requestId: "model-backed-core", originalUserQuery: "India democratic space 2022-2025 Freedom House V-Dem ECI Supreme Court RSF", outputDepth: "deep_research" });
   const evidenceRegistry = buildEvidenceRegistryFromSources(fixtureSources as any, agendaContract);
   const evidencePacks = Object.values(buildEvidencePacks(evidenceRegistry, agendaContract));
   const claimGraph = buildClaimGraph(evidenceRegistry, agendaContract);
-  const citations = evidenceRegistry.getCitationEligibleSources().slice(0, 30).map((source) => evidenceRegistry.getCitationMarkdown(source.id)).join(" ");
+  const citations = evidenceRegistry.getCitationEligibleSources().slice(0, RESEARCH_LIMITS.deep_research.minFinalUniqueCitedSources).map((source) => evidenceRegistry.getCitationMarkdown(source.id)).join(" ");
   let called = false;
   const providerRouter = {
     complete: async () => {
@@ -35,7 +36,7 @@ test("model-backed core answer path calls provider and validates registry citati
     evidenceRegistry,
     evidencePacks,
     claimGraph,
-    sourceUsageMaps: [buildSourceUsageMapFromRegistry("evidence_extractor", evidenceRegistry, agendaContract, 30)],
+    sourceUsageMaps: [buildModeSourceUsageMap("deep_research", "evidence_extractor", evidenceRegistry, agendaContract)],
     allowSyntheticSourceUsage: true,
     generationMode: "model",
     providerRouter,
@@ -44,7 +45,7 @@ test("model-backed core answer path calls provider and validates registry citati
   });
 
   assert.equal(called, true);
-  assert.ok(result.uniqueCitedSourceCount >= 30);
+  assert.ok(result.uniqueCitedSourceCount >= RESEARCH_LIMITS.deep_research.minFinalUniqueCitedSources);
   assert.equal(result.usedLegacyFallback, false);
 });
 
@@ -53,7 +54,7 @@ test("core answer repair pass reports changed when targeted repair modifies text
   const evidenceRegistry = buildEvidenceRegistryFromSources(fixtureSources as any, agendaContract);
   const evidencePacks = Object.values(buildEvidencePacks(evidenceRegistry, agendaContract));
   const claimGraph = buildClaimGraph(evidenceRegistry, agendaContract);
-  const citations = evidenceRegistry.getCitationEligibleSources().slice(0, 30).map((source) => evidenceRegistry.getCitationMarkdown(source.id)).join(" ");
+  const citations = evidenceRegistry.getCitationEligibleSources().slice(0, RESEARCH_LIMITS.deep_research.minFinalUniqueCitedSources).map((source) => evidenceRegistry.getCitationMarkdown(source.id)).join(" ");
   const providerRouter = {
     complete: async () => ({
       provider: "gemini",
@@ -70,7 +71,7 @@ test("core answer repair pass reports changed when targeted repair modifies text
     evidenceRegistry,
     evidencePacks,
     claimGraph,
-    sourceUsageMaps: [buildSourceUsageMapFromRegistry("evidence_extractor", evidenceRegistry, agendaContract, 20)],
+    sourceUsageMaps: [buildModeSourceUsageMap("deep_research", "evidence_extractor", evidenceRegistry, agendaContract)],
     allowSyntheticSourceUsage: true,
     generationMode: "model",
     providerRouter,

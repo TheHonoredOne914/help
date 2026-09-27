@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import {
   createMessage,
+  updateMessage,
   getArchiveById,
   getArchiveContext,
   getConversationById,
@@ -20,6 +21,7 @@ import {
   normalizeEffectiveResearchMode,
   queryHashFor,
 } from "./pipeline-types.js";
+import { capUserSystemPrompt, resolveRouteMode } from "./message-route-mode.js";
 
 export const SendAnthropicMessageParams = z.object({ id: z.number().int().positive() });
 export const ResearchModeSchema = z.enum(["fast_research", "deep_research", "council"]);
@@ -31,13 +33,25 @@ export const SendAnthropicMessageBody = z.object({
   creativity: z.number().min(0).max(1).optional(),
 });
 
-export const DEFAULT_GROQ_MODEL = "groq/llama-3.3-70b-versatile";
+import { DEFAULT_GROQ_MODEL, GROQ_LIVE_FALLBACK_NATIVE, remapUnavailableGroqModelId } from "../../core/providers/catalog/index.js";
+export { DEFAULT_GROQ_MODEL, GROQ_LIVE_FALLBACK_NATIVE, remapUnavailableGroqModelId };
+
+export function groqNativeModelFromRequest(raw?: string | null): string {
+  const id = (raw ?? "").trim();
+  const native = id.startsWith("groq/")
+    ? id.slice("groq/".length)
+    : id && !id.includes("/")
+      ? id
+      : GROQ_LIVE_FALLBACK_NATIVE;
+  return remapUnavailableGroqModelId(native || GROQ_LIVE_FALLBACK_NATIVE);
+}
 
 const TIMEOUT_CONFIG = {
   normal: 2 * 60 * 1000,
-  web_search: 5 * 60 * 1000,
-  deep_research: 15 * 60 * 1000,
-  fast_research: 8 * 60 * 1000,
+  // web_search resolves to fast_research internally; stream allowance matches 90s latency budget (+5s buffer).
+  web_search: 95 * 1000,
+  deep_research: 250 * 1000,
+  fast_research: 95 * 1000,
   council: 30 * 60 * 1000,
   rhetorics: 5 * 60 * 1000,
   drafting: 5 * 60 * 1000,
@@ -80,9 +94,13 @@ function invalidModelPrefixBody(): Record<string, unknown> {
   return {
     error: {
       code: "INVALID_MODEL_PREFIX",
-      message: "Unrecognized model prefix. Expected groq/, openrouter/, nvidia/, gemini/, github/, ollama/.",
+      message: "Unrecognized model prefix. Expected groq/, openrouter/, nvidia/, gemini/, github/, ollama/, cerebras/, or opencode/.",
     },
   };
+}
+
+export function resolveStreamTimeoutMs(routeMode: string): number {
+  return TIMEOUT_CONFIG[routeMode as keyof typeof TIMEOUT_CONFIG] ?? 5 * 60 * 1000;
 }
 
 export async function loadMessageRouteContext(
@@ -105,21 +123,19 @@ export async function loadMessageRouteContext(
   const userContent = bodyParsed.data.content;
   const mode = bodyParsed.data.mode ?? "normal";
   const freshnessDecision = detectFreshnessNeeded(userContent, mode);
-  const freshnessResearchMode: ResearchMode | null =
-    (mode === "normal" || mode === "rhetorics" || mode === "drafting") && freshnessDecision.needed
-      ? "fast_research"
-      : null;
-  const routeMode = freshnessResearchMode ?? mode;
-  const effectiveResearchMode = freshnessResearchMode ?? normalizeEffectiveResearchMode(userContent, mode, bodyParsed.data.researchMode);
+  // Freshness only annotates the run. It must not replace drafting or rhetorics with a research run.
+  const freshnessResearchMode: ResearchMode | null = null;
+  const routeMode = resolveRouteMode(mode);
+  const effectiveResearchMode = normalizeEffectiveResearchMode(userContent, mode, bodyParsed.data.researchMode);
   const rhetoricsType = (bodyParsed.data.rhetoricsType ?? null) as string | null;
   const rawCreativity = bodyParsed.data.creativity;
   const creativity = typeof rawCreativity === "number" ? Math.max(0, Math.min(1, rawCreativity)) : 0.5;
   const temperature = 0.4 + creativity * 0.9;
-  const rawSystemPrompt = typeof req.body.systemPrompt === "string" ? req.body.systemPrompt : "";
-  const userSystemPrompt = rawSystemPrompt.slice(0, 4000);
+  const rawSystemPrompt = capUserSystemPrompt(typeof req.body.systemPrompt === "string" ? req.body.systemPrompt : "");
+  const userSystemPrompt = rawSystemPrompt;
   const autoFallback = req.body.autoFallback === true;
   const suppliedNormalModel = typeof req.body.normalModel === "string" ? req.body.normalModel.trim() : "";
-  const rawNormalModel = suppliedNormalModel || DEFAULT_GROQ_MODEL;
+  const rawNormalModel = remapUnavailableGroqModelId(suppliedNormalModel || DEFAULT_GROQ_MODEL);
   try {
     parseProviderModelId(rawNormalModel);
   } catch {
@@ -132,16 +148,14 @@ export async function loadMessageRouteContext(
       if (typeof model !== "string" || !model.trim()) continue;
       try {
         parseProviderModelId(model.trim());
-        rawWebModels.push(model.trim());
+        rawWebModels.push(remapUnavailableGroqModelId(model.trim()));
       } catch {
         return { ok: false, status: 400, body: invalidModelPrefixBody() };
       }
     }
   }
   const effectiveWebModels = rawWebModels.length > 0 ? rawWebModels : [rawNormalModel];
-  const streamTimeoutMs = parseInt(process.env.STREAM_TIMEOUT_MS ?? "", 10)
-    || TIMEOUT_CONFIG[routeMode as keyof typeof TIMEOUT_CONFIG]
-    || 5 * 60 * 1000;
+  const streamTimeoutMs = resolveStreamTimeoutMs(routeMode);
 
   try {
     const convo = await getConversationById(conversationId, ownerUserId);
@@ -156,22 +170,37 @@ export async function loadMessageRouteContext(
     const combinedSystemPrompt = composeAnthropicSystemPrompt({
       archiveTopic,
       archiveSummary,
-      userSystemPrompt: rawSystemPrompt,
+      userSystemPrompt,
     });
 
-    const userMessage = await createMessage(conversationId, "user", userContent);
-    const assistantMessage = isResearchRouteMode(routeMode)
-      ? await createMessage(
-          conversationId,
-          "assistant",
-          freshnessResearchMode
-            ? "Freshness-sensitive research run started. Waiting for live-source output..."
-            : "Research run started. Waiting for streamed output...",
-        )
-      : undefined;
-
+    const regenerate = req.body?.regenerate === true;
+    const priorMessages = regenerate ? await getMessagesByConversationId(conversationId) : [];
+    const priorUser = [...priorMessages].reverse().find((message) => message.role === "user");
+    const priorAssistant = [...priorMessages].reverse().find((message) => message.role === "assistant");
+    const userMessage = regenerate && priorUser
+      ? priorUser
+      : await createMessage(conversationId, "user", userContent);
     const requestId = `req_${Date.now().toString(36)}_${randomUUID().slice(0, 8)}`;
     const runId = `run_${Date.now().toString(36)}_${randomUUID().slice(0, 8)}`;
+    const waitingCopy = "Research run started. Waiting for streamed output...";
+    const assistantMessage = isResearchRouteMode(routeMode)
+      ? regenerate && priorAssistant
+        ? await updateMessage(priorAssistant.id, {
+            content: waitingCopy,
+            runId,
+            runStatus: "running",
+          }) ?? priorAssistant
+        : await createMessage(
+            conversationId,
+            "assistant",
+            waitingCopy,
+            null,
+            runId,
+            "running",
+          )
+      : regenerate && priorAssistant
+        ? priorAssistant
+        : undefined;
     const runIdentity: ResearchRunIdentity = {
       runId,
       requestId,

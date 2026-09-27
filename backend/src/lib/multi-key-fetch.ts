@@ -1,3 +1,4 @@
+import { redactSecretString } from "../core/security/secret-redaction.js";
 import { logger } from "./logger.js";
 
 // Keep a rotating index for each set of keys to avoid repeatedly burning the first key.
@@ -65,6 +66,11 @@ function collectQueryCarrier(url: URL | null, name: string): QueryCarrier | null
   if (!value?.includes(",")) return null;
   const keys = parseKeys(value);
   return keys.length > 1 ? { type: "query", name, keyString: carrierKey(keys), keys } : null;
+}
+
+function redactLoggedError(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err ?? "network error");
+  return redactSecretString(raw).replace(/https?:\/\/\S+/gi, "[REDACTED_URL]");
 }
 
 function requestUrl(input: RequestInfo | URL): URL | null {
@@ -165,20 +171,22 @@ export async function multiKeyFetch(
     try {
       lastResponse = await fetchWith(input, init, newHeaders, newUrl);
     } catch (networkErr) {
-      // If the abort signal was already triggered (timeout / pipeline cancel), don't retry.
-      if ((init as RequestInit)?.signal?.aborted) {
-        if (attempt === tryOrder.length - 1) throw networkErr;
-        break;
-      }
+      // Abort stops the rotation. A null lastResponse must not be returned as if it were a response.
+      const aborted = init?.signal?.aborted || (networkErr as { name?: string })?.name === "AbortError";
+      if (aborted) throw networkErr;
       const maskedKey = `...${activeKey.slice(-4)}`;
-      logger.warn(`[multi-key-fetch] Key ${maskedKey} network error: ${(networkErr as Error)?.message ?? networkErr}. Rolling over to next key. (${attempt + 1}/${tryOrder.length})`);
+      logger.warn(`[multi-key-fetch] Key ${maskedKey} network error: ${redactLoggedError(networkErr)}. Rolling over to next key. (${attempt + 1}/${tryOrder.length})`);
       markKeyBad(cacheKey, activeKey);
       if (attempt === tryOrder.length - 1) throw networkErr;
       continue;
     }
 
     if (RETRYABLE_STATUSES.has(lastResponse.status)) {
-      if ((init as RequestInit)?.signal?.aborted) break;
+      if (init?.signal?.aborted) {
+        const abortErr = new Error("The operation was aborted");
+        abortErr.name = "AbortError";
+        throw abortErr;
+      }
       const maskedKey = `...${activeKey.slice(-4)}`;
       logger.warn(`[multi-key-fetch] Key ${maskedKey} got ${lastResponse.status}. Rolling over to next key. (${attempt + 1}/${tryOrder.length})`);
       if (BAD_KEY_STATUSES.has(lastResponse.status)) {

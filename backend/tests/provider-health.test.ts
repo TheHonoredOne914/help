@@ -1,50 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { extractKeys, resolveProvider } from "../src/lib/provider-router.js";
+import { extractKeys, parseProviderModelId } from "../src/lib/provider-router.js";
 import * as healthModule from "../src/routes/health.js";
 
 test("rejects model ids with unsupported provider prefixes", () => {
-  assert.throws(
-    () =>
-      resolveProvider("unknown/model-a", {
-        groqKey: null,
-        ollamaKey: null,
-        ollamaBase: null,
-        nvidiaKey: null,
-        geminiKey: null,
-        openrouterKey: null,
-        tavilyKey: null,
-        serperKey: null,
-        exaKey: null,
-        braveKey: null,
-        firecrawlKey: null,
-        jinaKey: null,
-        hfToken: null,
-      }),
-    /Unknown provider prefix/i,
-  );
+  assert.throws(() => parseProviderModelId("unknown/model-a"), /Unknown provider prefix/i);
 });
 
 test("rejects malformed model ids with empty provider or empty model segments", () => {
-  const emptyKeys = {
-    groqKey: null,
-    ollamaKey: null,
-    ollamaBase: null,
-    nvidiaKey: null,
-    geminiKey: null,
-    openrouterKey: null,
-    tavilyKey: null,
-    serperKey: null,
-    exaKey: null,
-    braveKey: null,
-    firecrawlKey: null,
-    jinaKey: null,
-    hfToken: null,
-  };
-
-  assert.throws(() => resolveProvider("/model-a", emptyKeys), /Invalid model ID/i);
-  assert.throws(() => resolveProvider("groq/", emptyKeys), /Invalid model ID/i);
+  assert.throws(() => parseProviderModelId("/model-a"), /Invalid model ID/i);
+  assert.throws(() => parseProviderModelId("groq/"), /Invalid model ID/i);
 });
 
 test("extractKeys trims values, accepts header arrays, and matches headers case-insensitively", () => {
@@ -75,7 +41,14 @@ test("extractKeys trims values, accepts header arrays, and matches headers case-
     braveKey: null,
     firecrawlKey: null,
     jinaKey: null,
+    scraperapiKey: null,
+    zenrowsKey: null,
+    scrapingbeeKey: null,
+    geekflareKey: null,
     hfToken: "hf-token",
+    cerebrasKey: null,
+    openaiKey: null,
+    opencodeKey: null,
   });
 });
 

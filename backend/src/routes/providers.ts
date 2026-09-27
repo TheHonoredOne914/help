@@ -5,8 +5,26 @@ import { getGroqClient, isGroqEnabled } from "../lib/groq-client.js";
 import { getOllamaClient, isOllamaEnabled } from "../lib/ollama-client.js";
 import { isNvidiaEnabled, NVIDIA_BASE_URL } from "../lib/nvidia-client.js";
 import { getGeminiClient } from "../lib/gemini-client.js";
-import { CEREBRAS_BASE_URL, CEREBRAS_CATALOG } from "../lib/cerebras-client.js";
+import { CEREBRAS_BASE_URL } from "../lib/cerebras-client.js";
+import { OPENCODE_ZEN_BASE_URL } from "../core/providers/opencode-zen-provider.js";
+import {
+  CEREBRAS_MODELS_CATALOG,
+  GITHUB_MODELS_CATALOG,
+  GROQ_CATALOG,
+  NVIDIA_CATALOG,
+  OLLAMA_CATALOG,
+  OPENCODE_ZEN_MODELS_CATALOG,
+  OPENROUTER_CATALOG,
+  buildPrefixedModelId,
+  filterOpenCodeZenFreeModels,
+  filterUnsupportedListedModels,
+  isOpenCodeZenFreeModel,
+  isOpenRouterFreeListedModel,
+  isUnsupportedListedModel,
+  readableCatalogModelName as readableModelName,
+} from "../core/providers/catalog/index.js";
 import { multiKeyFetch } from "../lib/multi-key-fetch.js";
+import { primaryApiKey } from "../lib/normalize-keys.js";
 import { extractKeys } from "../lib/provider-router.js";
 import type { RequestKeys } from "../lib/types.js";
 import { redactSecretString } from "../core/security/secret-redaction.js";
@@ -47,72 +65,21 @@ export interface ProviderModelListPayload {
   catalogFallbackOnly?: boolean;
 }
 
-export const GROQ_CATALOG: ProviderModelListItem[] = [
-  { id: "llama-3.3-70b-versatile", name: "Llama 3.3 70B Versatile", ownedBy: "meta", badge: "flagship" },
-  { id: "llama-3.1-8b-instant", name: "Llama 3.1 8B Instant", ownedBy: "meta", badge: "fast" },
-  { id: "openai/gpt-oss-120b", name: "GPT-OSS 120B", ownedBy: "openai", badge: "flagship" },
-  { id: "openai/gpt-oss-20b", name: "GPT-OSS 20B", ownedBy: "openai", badge: "fast" },
-  { id: "qwen/qwen3-32b", name: "Qwen3 32B", ownedBy: "qwen", badge: "reason" },
-];
-
-export const OPENROUTER_CATALOG: ProviderModelListItem[] = [
-  { id: "openai/gpt-4.1", name: "GPT-4.1", ownedBy: "openai", badge: "flagship" },
-  { id: "openai/gpt-4o", name: "GPT-4o", ownedBy: "openai", badge: "stable" },
-  { id: "openai/gpt-4o-mini", name: "GPT-4o Mini", ownedBy: "openai", badge: "fast" },
-  { id: "anthropic/claude-sonnet-4-20250514", name: "Claude Sonnet 4", ownedBy: "anthropic", badge: "flagship" },
-  { id: "google/gemini-2.5-pro", name: "Gemini 2.5 Pro", ownedBy: "google", badge: "flagship" },
-  { id: "google/gemini-2.5-flash", name: "Gemini 2.5 Flash", ownedBy: "google", badge: "fast" },
-  { id: "meta-llama/llama-3.3-70b-instruct", name: "Llama 3.3 70B", ownedBy: "meta", badge: "meta" },
-  { id: "deepseek/deepseek-r1", name: "DeepSeek R1", ownedBy: "deepseek", badge: "reason" },
-  { id: "qwen/qwen3-32b", name: "Qwen3 32B", ownedBy: "qwen", badge: "reason" },
-];
-
-export const OLLAMA_CATALOG: ProviderModelListItem[] = [
-  { id: "llama3.3", name: "Llama 3.3", ownedBy: "meta", badge: "flagship" },
-  { id: "llama3.1", name: "Llama 3.1", ownedBy: "meta", badge: "stable" },
-  { id: "mistral", name: "Mistral", ownedBy: "mistral", badge: "stable" },
-  { id: "qwen2.5", name: "Qwen 2.5", ownedBy: "qwen", badge: "reason" },
-  { id: "deepseek-r1", name: "DeepSeek R1", ownedBy: "deepseek", badge: "reason" },
-  { id: "gemma2", name: "Gemma 2", ownedBy: "google", badge: "fast" },
-  { id: "phi4", name: "Phi-4", ownedBy: "microsoft", badge: "compact" },
-];
-
-export const NVIDIA_CATALOG: ProviderModelListItem[] = [
-  { id: "moonshotai/kimi-k2.6", name: "Kimi K2.6", ownedBy: "moonshotai", badge: "agentic" },
-  { id: "deepseek-ai/deepseek-v4-0324", name: "DeepSeek V4", ownedBy: "deepseek", badge: "reason" },
-  { id: "nvidia/llama-3.3-nemotron-super-49b-v1", name: "Nemotron Super", ownedBy: "nvidia", badge: "flagship" },
-  { id: "nvidia/llama-3.1-nemotron-nano-8b-v1", name: "Nemotron Nano", ownedBy: "nvidia", badge: "fast" },
-  { id: "meta/llama-3.3-70b-instruct", name: "Llama 3.3 70B Instruct", ownedBy: "meta", badge: "meta" },
-  { id: "meta/llama-3.1-8b-instruct", name: "Llama 3.1 8B Instruct", ownedBy: "meta", badge: "fast" },
-  { id: "mistralai/mistral-large-2-instruct", name: "Mistral Large 2", ownedBy: "mistralai", badge: "mistral" },
-  { id: "google/gemma-3-27b-it", name: "Gemma 3 27B", ownedBy: "google", badge: "google" },
-  { id: "qwen/qwen2.5-72b-instruct", name: "Qwen 2.5 72B", ownedBy: "qwen", badge: "reason" },
-];
-
-export const GITHUB_MODELS_CATALOG: ProviderModelListItem[] = [
-  { id: "openai/gpt-4.1", name: "GPT-4.1", ownedBy: "openai", badge: "flagship" },
-  { id: "openai/gpt-4.1-mini", name: "GPT-4.1 Mini", ownedBy: "openai", badge: "fast" },
-  { id: "openai/gpt-4o", name: "GPT-4o", ownedBy: "openai", badge: "stable" },
-  { id: "openai/gpt-4o-mini", name: "GPT-4o Mini", ownedBy: "openai", badge: "fast" },
-  { id: "meta/llama-3.3-70b-instruct", name: "Llama 3.3 70B Instruct", ownedBy: "meta", badge: "meta" },
-  { id: "deepseek/deepseek-r1", name: "DeepSeek R1", ownedBy: "deepseek", badge: "reason" },
-  { id: "microsoft/phi-4", name: "Phi-4", ownedBy: "microsoft", badge: "compact" },
-  { id: "mistral-ai/mistral-large", name: "Mistral Large", ownedBy: "mistral-ai", badge: "mistral" },
-];
-
-export const CEREBRAS_MODELS_CATALOG: ProviderModelListItem[] = CEREBRAS_CATALOG.map((model) => ({
-  id: model.id,
-  name: model.name,
-  ownedBy: "cerebras",
-  badge: model.badge,
-  contextWindow: model.contextWindow,
-}));
+export {
+  CEREBRAS_MODELS_CATALOG,
+  GITHUB_MODELS_CATALOG,
+  GROQ_CATALOG,
+  NVIDIA_CATALOG,
+  OLLAMA_CATALOG,
+  OPENCODE_ZEN_MODELS_CATALOG,
+  OPENROUTER_CATALOG,
+  buildPrefixedModelId,
+  filterUnsupportedListedModels,
+  isOpenRouterFreeListedModel,
+  isUnsupportedListedModel,
+};
 
 const providerStatusCache = new Map<string, { expiresAt: number; payload: ProviderStatusPayload }>();
-
-export function buildPrefixedModelId(provider: string, modelId: string): string {
-  return `${provider}/${modelId}`;
-}
 
 export function normalizeNvidiaModels(data: unknown): ProviderModelListItem[] {
   const raw = Array.isArray((data as any)?.data) ? (data as any).data : Array.isArray(data) ? data as any[] : [];
@@ -151,8 +118,8 @@ export async function listNvidiaModels(apiKey: string | null | undefined, fetchF
       const body = redactKnownSecret(await safeResponseText(response), apiKey);
       throw new ProviderRouteError(statusFromHttp(response.status), `NVIDIA models endpoint returned ${response.status}: ${body}`, response.status);
     }
-    const liveModels = normalizeNvidiaModels(await response.json());
-    const displayModels = dedupeModels([...liveModels, ...NVIDIA_CATALOG]).sort(sortModels);
+    const liveModels = filterUnsupportedListedModels(normalizeNvidiaModels(await response.json()));
+    const displayModels = filterUnsupportedListedModels(dedupeModels([...liveModels, ...NVIDIA_CATALOG])).sort(sortModels);
     return {
       provider: "nvidia",
       configured: true,
@@ -170,7 +137,7 @@ export async function listNvidiaModels(apiKey: string | null | undefined, fetchF
   } catch (err) {
     const status = err instanceof ProviderRouteError ? err.code as ProviderRouteStatus : statusCodeFromError(err);
     const invalidOrRateLimited = status === "invalid_key" || status === "rate_limited";
-    const displayModels = invalidOrRateLimited ? [] : [...NVIDIA_CATALOG].sort(sortModels);
+    const displayModels = invalidOrRateLimited ? [] : filterUnsupportedListedModels([...NVIDIA_CATALOG]).sort(sortModels);
     return {
       provider: "nvidia",
       configured: true,
@@ -283,6 +250,69 @@ export async function listCerebrasModels(apiKey: string | null | undefined, fetc
   }
 }
 
+export function normalizeOpenCodeZenModels(data: unknown): ProviderModelListItem[] {
+  const raw = Array.isArray((data as any)?.data) ? (data as any).data : Array.isArray(data) ? data as any[] : [];
+  const freeIds = filterOpenCodeZenFreeModels(raw.map((item: any) => String(item.id ?? item.name ?? "").trim()).filter(Boolean));
+  return dedupeModels(
+    freeIds.map((id) => ({
+      id,
+      name: readableModelName(id),
+      ownedBy: "opencode",
+      badge: "free",
+    })),
+  );
+}
+
+export async function listOpenCodeZenModels(apiKey: string | null | undefined, fetchFn: typeof fetch = multiKeyFetch): Promise<ProviderModelListPayload> {
+  if (!apiKey?.trim()) throw new ProviderRouteError("missing_key", "OpenCode Zen API key is not configured. Provide OPENCODE_API_KEY.", 400);
+  const started = Date.now();
+  try {
+    const response = await fetchWithTimeout(fetchFn, `${OPENCODE_ZEN_BASE_URL}/models`, {
+      headers: { Authorization: `Bearer ${apiKey.trim()}` },
+    }, 12_000);
+    if (!response.ok) {
+      const body = redactKnownSecret(await safeResponseText(response), apiKey);
+      throw new ProviderRouteError(statusFromHttp(response.status), `OpenCode Zen models endpoint returned ${response.status}: ${body}`, response.status);
+    }
+    const liveModels = normalizeOpenCodeZenModels(await response.json());
+    const displayModels = dedupeModels([...liveModels, ...OPENCODE_ZEN_MODELS_CATALOG.filter((m) => isOpenCodeZenFreeModel(m.id))]).sort(sortModels);
+    return {
+      provider: "opencode",
+      configured: true,
+      healthy: liveModels.length > 0,
+      status: liveModels.length > 0 ? "healthy" : "network_error",
+      source: "live",
+      models: displayModels,
+      modelCount: displayModels.length,
+      chatVerified: liveModels.length > 0,
+      canChat: liveModels.length > 0,
+      canListModels: true,
+      liveModelListVerified: liveModels.length > 0,
+      latencyMs: Date.now() - started,
+    };
+  } catch (err) {
+    const status = err instanceof ProviderRouteError ? err.code as ProviderRouteStatus : statusCodeFromError(err);
+    const invalidOrRateLimited = status === "invalid_key" || status === "rate_limited";
+    const displayModels = invalidOrRateLimited ? [] : [...OPENCODE_ZEN_MODELS_CATALOG].sort(sortModels);
+    return {
+      provider: "opencode",
+      configured: true,
+      healthy: false,
+      status: invalidOrRateLimited ? status : "catalog_fallback",
+      source: "catalog_fallback",
+      models: displayModels,
+      modelCount: displayModels.length,
+      chatVerified: false,
+      canChat: false,
+      canListModels: !invalidOrRateLimited,
+      liveModelListVerified: false,
+      catalogFallbackOnly: true,
+      error: redactKnownSecret(safeMessage(err, "Failed to verify OpenCode Zen models"), apiKey),
+      latencyMs: Date.now() - started,
+    };
+  }
+}
+
 router.get("/groq/models", async (req, res) => {
   const keys = extractKeys(req);
   if (!isGroqEnabled(keys.groqKey)) {
@@ -292,10 +322,11 @@ router.get("/groq/models", async (req, res) => {
   const started = Date.now();
   try {
     const list = await getGroqClient(keys.groqKey).models.list();
-    const models = list.data
+    const rawGroqModels = list.data
       .filter((m) => (m as any).object === "model")
       .sort((a, b) => a.id.localeCompare(b.id))
       .map((m) => ({ id: m.id, created: m.created, ownedBy: (m as any).owned_by ?? "groq" }));
+    const models = filterUnsupportedListedModels(rawGroqModels);
     sendProviderModelPayload(res, { provider: "groq", configured: true, healthy: models.length > 0, status: models.length > 0 ? "healthy" : "network_error", source: "live", models, modelCount: models.length, latencyMs: Date.now() - started });
   } catch (err: any) {
     const status = statusCodeFromError(err);
@@ -387,6 +418,20 @@ router.get("/cerebras/models", async (req, res) => {
   }
 });
 
+router.get("/opencode/models", async (req, res) => {
+  const keys = extractKeys(req);
+  const key = keys.opencodeKey ?? process.env.OPENCODE_API_KEY ?? process.env.OPENCODE_ZEN_API_KEY ?? "";
+  if (!key) {
+    sendProviderModelPayload(res, providerRouteErrorPayload("opencode", "missing_key", "OpenCode Zen API key is not configured. Provide OPENCODE_API_KEY.", false));
+    return;
+  }
+  try {
+    sendProviderModelPayload(res, await listOpenCodeZenModels(key));
+  } catch (err: any) {
+    sendProviderModelPayload(res, providerRouteErrorPayload("opencode", err.code ?? statusCodeFromError(err), safeMessage(err, "Failed to list OpenCode Zen models"), true));
+  }
+});
+
 router.get("/gemini/models", async (req, res) => {
   const keys = extractKeys(req);
   const key = keys.geminiKey ?? process.env.GEMINI_API_KEY ?? "";
@@ -468,16 +513,33 @@ router.get("/openrouter/models", async (req, res) => {
       headers: { Authorization: `Bearer ${key}` },
     }, 12_000);
     if (!resp.ok) throw new ProviderRouteError(statusFromHttp(resp.status), `OpenRouter ${resp.status}: ${await safeResponseText(resp)}`, resp.status);
-    const data = await resp.json() as { data?: Array<{ id: string; name?: string; context_length?: number; owned_by?: string }> };
-    const ALLOWED = ["openai", "anthropic", "google", "meta-llama", "mistralai", "deepseek", "qwen", "nvidia", "cohere", "microsoft", "x-ai", "moonshotai"];
-    const models = (data.data ?? [])
-      .filter((m) => ALLOWED.some((org) => m.id.startsWith(org)))
-      .map((m) => ({ id: m.id, name: m.name ?? m.id, contextWindow: m.context_length ?? 0, ownedBy: m.owned_by ?? "openrouter" }))
-      .sort(sortModels);
+    const data = await resp.json() as {
+      data?: Array<{
+        id: string;
+        name?: string;
+        context_length?: number;
+        owned_by?: string;
+        architecture?: { modality?: string };
+        pricing?: { prompt?: string; completion?: string };
+      }>
+    };
+    const raw = data.data ?? [];
+    const models = filterUnsupportedListedModels(
+      raw
+        .filter((m) => isOpenRouterFreeListedModel(m.id, m.pricing))
+        .filter((m) => {
+          const modality = String(m.architecture?.modality ?? "");
+          return !/->image|->audio|image->image/i.test(modality);
+        })
+        .map((m) => ({ id: m.id, name: m.name ?? m.id, contextWindow: m.context_length ?? 0, ownedBy: m.owned_by ?? "openrouter", badge: "free" }))
+        .sort(sortModels),
+    );
     sendProviderModelPayload(res, { provider: "openrouter", configured: true, healthy: models.length > 0, status: models.length > 0 ? "healthy" : "network_error", source: "live", models, modelCount: models.length, latencyMs: Date.now() - started });
   } catch (err: any) {
     const status = statusCodeFromError(err);
-    const fallbackModels = status === "network_error" ? [...OPENROUTER_CATALOG] : [];
+    const fallbackModels = status === "network_error"
+      ? OPENROUTER_CATALOG.filter((model) => isOpenRouterFreeListedModel(model.id))
+      : [];
     sendProviderModelPayload(res, {
       provider: "openrouter",
       configured: true,
@@ -509,16 +571,18 @@ export async function buildProviderStatusPayload(keys: RequestKeys, options: { f
   const cacheKey = options.cacheKey ?? statusCacheKey(keys);
   const cached = providerStatusCache.get(cacheKey);
   if (!options.bypassCache && cached && cached.expiresAt > now) return cached.payload;
-  const fetchFn = options.fetchFn ?? fetch;
+  const fetchFn = options.fetchFn ?? multiKeyFetch;
   const timeoutMs = resolveProviderStatusTimeoutMs(options.timeoutMs);
   const checks: Array<[string, () => Promise<ProviderStatusPayload["providers"][string]>]> = [
     ["groq", () => probeProviderModels("groq", Boolean(keys.groqKey ?? process.env.GROQ_API_KEY), async () => {
       try {
         const groq = getGroqClient(keys.groqKey);
         const list = await groq.models.list();
-        const models = list.data
-          .filter((m) => (m as any).object === "model")
-          .map((m) => ({ id: m.id }));
+        const models = filterUnsupportedListedModels(
+          list.data
+            .filter((m) => (m as any).object === "model")
+            .map((m) => ({ id: m.id })),
+        );
         if (models.length === 0) throw new ProviderRouteError("network_error", "Groq returned empty model list", 502);
         return { provider: "groq", configured: true, healthy: true, status: "healthy" as const, source: "live" as const, models };
       } catch (err) {
@@ -533,8 +597,10 @@ export async function buildProviderStatusPayload(keys: RequestKeys, options: { f
         headers: { Authorization: `Bearer ${orKey}` },
       }, 8_000);
       if (!response.ok) throw new ProviderRouteError(statusFromHttp(response.status), `OpenRouter ${response.status}: ${await safeResponseText(response)}`, response.status);
-      const data = await response.json() as { data?: Array<{ id: string }> };
-      const models = (data.data ?? []).map((m) => ({ id: m.id }));
+      const data = await response.json() as { data?: Array<{ id: string; pricing?: { prompt?: string; completion?: string } }> };
+      const models = (data.data ?? [])
+        .filter((m) => isOpenRouterFreeListedModel(m.id, m.pricing) && !isUnsupportedListedModel(m.id))
+        .map((m) => ({ id: m.id }));
       return { provider: "openrouter", configured: true, healthy: true, status: "healthy" as const, source: "live" as const, models };
     }, timeoutMs, configuredFromSource(keys.openrouterKey, process.env.OPENROUTER_API_KEY ?? process.env.OPENROUTER_KEY))],
     ["nvidia", () => probeProviderModels("nvidia", Boolean(keys.nvidiaKey ?? process.env.NVIDIA_API_KEY), async () => {
@@ -547,8 +613,8 @@ export async function buildProviderStatusPayload(keys: RequestKeys, options: { f
         const body = redactKnownSecret(await safeResponseText(response), nvidiaKey);
         throw new ProviderRouteError(statusFromHttp(response.status), `NVIDIA ${response.status}: ${body}`, response.status);
       }
-      const liveModels = normalizeNvidiaModels(await response.json());
-      const models = [...liveModels, ...NVIDIA_CATALOG].map((m) => ({ id: m.id }));
+      const liveModels = filterUnsupportedListedModels(normalizeNvidiaModels(await response.json()));
+      const models = filterUnsupportedListedModels([...liveModels, ...NVIDIA_CATALOG]).map((m) => ({ id: m.id }));
       return { provider: "nvidia", configured: true, healthy: true, status: "healthy" as const, source: "live" as const, models };
     }, timeoutMs, configuredFromSource(keys.nvidiaKey, process.env.NVIDIA_API_KEY))],
     ["github", () => probeProviderModels("github", Boolean(keys.githubToken ?? process.env.GITHUB_MODELS_API_KEY ?? process.env.GITHUB_TOKEN), () => listGithubModels(keys.githubToken ?? process.env.GITHUB_MODELS_API_KEY ?? process.env.GITHUB_TOKEN, fetchFn).catch(() => ({
@@ -559,6 +625,10 @@ export async function buildProviderStatusPayload(keys: RequestKeys, options: { f
       provider: "cerebras", configured: true, healthy: false, status: "catalog_fallback" as const, source: "catalog_fallback" as const,
       models: CEREBRAS_MODELS_CATALOG.map((m) => ({ id: m.id })),
     })), timeoutMs, configuredFromSource(keys.cerebrasKey, process.env.CEREBRAS_API_KEY))],
+    ["opencode", () => probeProviderModels("opencode", Boolean(keys.opencodeKey ?? process.env.OPENCODE_API_KEY ?? process.env.OPENCODE_ZEN_API_KEY), () => listOpenCodeZenModels(keys.opencodeKey ?? process.env.OPENCODE_API_KEY ?? process.env.OPENCODE_ZEN_API_KEY, fetchFn).catch(() => ({
+      provider: "opencode", configured: true, healthy: false, status: "catalog_fallback" as const, source: "catalog_fallback" as const,
+      models: OPENCODE_ZEN_MODELS_CATALOG.map((m) => ({ id: m.id })),
+    })), timeoutMs, configuredFromSource(keys.opencodeKey, process.env.OPENCODE_API_KEY ?? process.env.OPENCODE_ZEN_API_KEY))],
     ["gemini", () => probeProviderModels("gemini", Boolean(keys.geminiKey ?? process.env.GEMINI_API_KEY), async () => {
       const geminiKey = keys.geminiKey ?? process.env.GEMINI_API_KEY ?? "";
       if (!geminiKey) throw new ProviderRouteError("missing_key", "Gemini key missing", 400);
@@ -682,9 +752,10 @@ router.get("/gemini/status", async (req, res) => {
 
 router.get("/tavily/status", async (req, res) => {
   const keys = extractKeys(req);
-  const key = keys.tavilyKey ?? process.env.TAVILY_API_KEY ?? "";
+  const key = primaryApiKey(keys.tavilyKey ?? process.env.TAVILY_API_KEY) ?? "";
   if (!key) return res.json({ status: "not_configured", message: "No Tavily API key set" });
   try {
+    // ponytail: SDK has no fetch hook — primary slot only; live search uses multiKeyFetch
     await tavily({ apiKey: key }).search("test", { maxResults: 1 });
     res.json({ status: "ok", message: "Tavily key is valid" });
   } catch (err: any) {
@@ -815,7 +886,15 @@ function sendProviderModelPayload(
   res: { status: (code: number) => { json: (body: unknown) => unknown } },
   payload: ProviderModelListPayload | Record<string, unknown>,
 ): void {
-  const normalized = normalizeProviderModelRoutePayload(payload as any);
+  const rawModels = Array.isArray((payload as any).models) ? (payload as any).models as Array<{ id: string }> : [];
+  const filteredPayload = Array.isArray((payload as any).models)
+    ? {
+      ...payload,
+      models: filterUnsupportedListedModels(rawModels),
+      modelCount: filterUnsupportedListedModels(rawModels).length,
+    }
+    : payload;
+  const normalized = normalizeProviderModelRoutePayload(filteredPayload as any);
   logProviderCall({
     event: "provider_model_route_status",
     providerName: String((payload as any).provider ?? "unknown"),
@@ -834,7 +913,7 @@ function sendProviderModelPayload(
     errorCode: normalized.status === "healthy" ? null : normalized.status,
     success: normalized.status === "healthy",
   });
-  sendProviderStatusPayload(res, payload);
+  sendProviderStatusPayload(res, filteredPayload);
 }
 
 export function fingerprint(value: string): string {
@@ -848,6 +927,7 @@ export function statusCacheKey(keys: RequestKeys): string {
     ["nvidia", keys.nvidiaKey ?? process.env.NVIDIA_API_KEY ?? ""],
     ["github", keys.githubToken ?? process.env.GITHUB_MODELS_API_KEY ?? process.env.GITHUB_TOKEN ?? ""],
     ["cerebras", keys.cerebrasKey ?? process.env.CEREBRAS_API_KEY ?? ""],
+    ["opencode", keys.opencodeKey ?? process.env.OPENCODE_API_KEY ?? process.env.OPENCODE_ZEN_API_KEY ?? ""],
     ["gemini", keys.geminiKey ?? process.env.GEMINI_API_KEY ?? ""],
     ["tavily", keys.tavilyKey ?? process.env.TAVILY_API_KEY ?? ""],
     ["jina", keys.jinaKey ?? process.env.JINA_API_KEY ?? process.env.JINA_KEY ?? ""],
@@ -1037,14 +1117,6 @@ async function validateGithubModelsToken(token: string, fetchFn: typeof fetch): 
   }
 }
 
-function readableModelName(id: string): string {
-  const last = id.split("/").pop() ?? id;
-  if (/kimi-k2\.6/i.test(id)) return "Kimi K2.6";
-  if (/nemotron-ultra/i.test(id)) return "Nemotron Ultra";
-  if (/nemotron-super/i.test(id)) return "Nemotron Super";
-  return last.split(/[-_]/g).filter(Boolean).map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
-}
-
 function badgeForNvidiaModel(id: string): string | undefined {
   if (/kimi|moonshot/i.test(id)) return "agentic";
   if (/ultra/i.test(id)) return "ultra";
@@ -1075,10 +1147,10 @@ function dedupeModels(models: ProviderModelListItem[]): ProviderModelListItem[] 
 
 function sortModels(a: { id: string }, b: { id: string }): number {
   const rank = (id: string) =>
-    /kimi-k2\.6/i.test(id) ? 0
-      : /nemotron-ultra/i.test(id) ? 1
-      : /nemotron-super/i.test(id) ? 2
-      : /llama3\.3-70b/i.test(id) ? 3
+    /gpt-oss-120b/i.test(id) ? 0
+      : /nemotron-super/i.test(id) ? 1
+      : /llama-3\.3-70b-instruct/i.test(id) ? 2
+      : /llama-3\.1-8b/i.test(id) ? 3
       : /llama3\.1-8b/i.test(id) ? 4
       : 10;
   return rank(a.id) - rank(b.id) || a.id.localeCompare(b.id);

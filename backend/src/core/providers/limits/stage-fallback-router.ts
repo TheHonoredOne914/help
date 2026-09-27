@@ -2,11 +2,12 @@ import type { ProviderName } from "../provider-types.js";
 import type { ProviderStage } from "./provider-limit-types.js";
 
 export const STAGE_FALLBACK_ORDER: Record<ProviderStage, ProviderName[]> = {
-  final_generation: ["nvidia", "gemini", "openai", "openrouter", "groq", "github", "cerebras"],
-  core_generation: ["nvidia", "gemini", "openai", "openrouter", "groq", "github", "cerebras"],
-  role_generation: ["groq", "nvidia", "gemini", "openrouter", "github", "cerebras"],
-  repair: ["gemini", "openai", "groq", "nvidia", "openrouter", "cerebras"],
-  synthesis: ["gemini", "openai", "nvidia", "openrouter", "groq", "cerebras"],
+  // OpenCode Zen free models first, then Groq/OpenRouter → NVIDIA → GitHub Models
+  final_generation: ["opencode", "groq", "openrouter", "nvidia", "github", "gemini", "openai"],
+  core_generation: ["opencode", "groq", "openrouter", "nvidia", "github", "gemini", "openai"],
+  role_generation: ["opencode", "groq", "openrouter", "nvidia", "github", "gemini"],
+  repair: ["opencode", "gemini", "openai", "groq", "openrouter", "nvidia", "github"],
+  synthesis: ["opencode", "gemini", "openai", "groq", "openrouter", "nvidia", "github"],
   extraction: ["firecrawl", "jina"] as unknown as ProviderName[],
   search: ["tavily", "serper", "exa", "brave"] as unknown as ProviderName[],
 };
@@ -18,9 +19,9 @@ export function getFallbackOrderForStage(
 ): ProviderName[] {
   const base = STAGE_FALLBACK_ORDER[stage] ?? [];
   const validProviders = new Set(availableProviders);
-  const ordered = [primaryProvider, ...base];
   const seen = new Set<ProviderName>();
-  return ordered.filter((provider) => {
+  return base.filter((provider) => {
+    if (provider === primaryProvider) return false;
     if (!validProviders.has(provider)) return false;
     if (seen.has(provider)) return false;
     seen.add(provider);

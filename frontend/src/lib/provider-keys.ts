@@ -16,6 +16,7 @@ export interface ProviderKeys {
   openrouterApiKey: string;
   githubModelsApiKey: string;
   cerebrasApiKey: string;
+  opencodeApiKey: string;
   scraperapiApiKey: string;
   zenrowsApiKey: string;
   scrapingbeeApiKey: string;
@@ -38,6 +39,7 @@ export const DEFAULT_PROVIDER_KEYS: ProviderKeys = {
   openrouterApiKey: "",
   githubModelsApiKey: "",
   cerebrasApiKey: "",
+  opencodeApiKey: "",
   scraperapiApiKey: "",
   zenrowsApiKey: "",
   scrapingbeeApiKey: "",
@@ -64,7 +66,6 @@ export function getProviderHeadersFromKeys(k: ProviderKeys): Record<string, stri
   if (k.nvidiaApiKey.trim()) h["X-Nvidia-Api-Key"] = k.nvidiaApiKey.trim();
   if (k.ollamaApiKey.trim()) h["X-Ollama-Api-Key"] = k.ollamaApiKey.trim();
   if (k.ollamaBaseUrl.trim()) h["X-Ollama-Base-Url"] = k.ollamaBaseUrl.trim();
-  if (k.openaiApiKey.trim()) h["X-OpenAI-Api-Key"] = k.openaiApiKey.trim();
   if (k.geminiApiKey.trim()) h["X-Gemini-Api-Key"] = k.geminiApiKey.trim();
   if (k.tavilyApiKey.trim()) h["X-Tavily-Api-Key"] = k.tavilyApiKey.trim();
   if (k.serperApiKey.trim()) h["X-Serper-Api-Key"] = k.serperApiKey.trim();
@@ -78,6 +79,7 @@ export function getProviderHeadersFromKeys(k: ProviderKeys): Record<string, stri
     h["X-GitHub-Token"] = k.githubModelsApiKey.trim();
   }
   if (k.cerebrasApiKey.trim()) h["X-Cerebras-Api-Key"] = k.cerebrasApiKey.trim();
+  if (k.opencodeApiKey.trim()) h["X-OpenCode-Api-Key"] = k.opencodeApiKey.trim();
   if (k.scraperapiApiKey.trim()) h["X-ScraperAPI-Key"] = k.scraperapiApiKey.trim();
   if (k.zenrowsApiKey.trim()) h["X-ZenRows-Api-Key"] = k.zenrowsApiKey.trim();
   if (k.scrapingbeeApiKey.trim()) h["X-ScrapingBee-Api-Key"] = k.scrapingbeeApiKey.trim();

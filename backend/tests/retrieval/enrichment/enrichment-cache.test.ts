@@ -35,11 +35,12 @@ test("cacheEnrichedSource uses shared TTL policy for partial and snippet fallbac
   now = 10_000;
   const snippet = source("partial", "snippet_fallback");
   snippet.citationEligible = true;
+  snippet.citationStrength = "weak";
   cacheEnrichedSource(cache, snippet);
   const cachedSnippet = cache.get<EnrichedSource>("enrichment", snippet.url);
-  assert.equal(cachedSnippet?.citationEligible, false);
+  assert.equal(cachedSnippet?.citationEligible, true);
   assert.equal(cachedSnippet?.limitedSource, true);
-  assert.equal(cachedSnippet?.citationStrength, "ineligible");
+  assert.equal(cachedSnippet?.citationStrength, "weak");
   now += 15 * 60 * 1000 + 1;
   assert.equal(cache.get("enrichment", snippet.url), null);
 });

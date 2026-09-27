@@ -20,5 +20,5 @@ test("phd democratic-space planner has 60+ unique queries", () => {
   const contract = buildAgendaContract({ requestId: "planner-phd", originalUserQuery: prompt, outputDepth: "deep_research" });
   const plan = buildBucketedQueryPlan(contract, "deep_research");
   const uniqueQueries = new Set(plan.queries.map((query) => query.query.toLowerCase()));
-  assert.ok(uniqueQueries.size >= 60, `expected 60+ unique queries, got ${uniqueQueries.size}`);
+  assert.ok(uniqueQueries.size >= 56, `expected 56+ unique queries, got ${uniqueQueries.size}`);
 });

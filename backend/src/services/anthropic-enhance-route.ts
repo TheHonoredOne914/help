@@ -5,6 +5,7 @@ import { getGeminiClient, isGeminiEnabled } from "../lib/gemini-client.js";
 import { getGroqClient, isGroqEnabled } from "../lib/groq-client.js";
 import { getNvidiaClient, isNvidiaEnabled } from "../lib/nvidia-client.js";
 import { classifyTopic, type TopicType } from "../lib/rag.js";
+import { remapUnavailableGroqModelId } from "../core/providers/catalog/index.js";
 import { extractKeys } from "../lib/provider-router.js";
 
 type ChatMessage = { role: "user" | "assistant" | "system"; content: string };
@@ -19,8 +20,8 @@ export interface EnhanceRouteDependencies {
   ) => Promise<string>;
 }
 
-function buildEnhanceMetaPrompt(prompt: string, mode: string): string {
-  const isResearch = mode === "web_search" || mode === "deep_research";
+function buildEnhanceInstruction(prompt: string, mode: string): string {
+  const isResearch = mode === "web_search" || mode === "deep_research" || mode === "fast_research" || mode === "council";
   const topic = classifyTopic(prompt);
 
   const angleHints: Partial<Record<TopicType, string>> = {
@@ -49,18 +50,16 @@ function buildEnhanceMetaPrompt(prompt: string, mode: string): string {
 
   if (!isResearch) {
     return `Expand into a clearer, more specific Indian MUN research prompt.
-Add 3-4 specific angles and source types. Under 120 words. Output ONLY the enhanced prompt.
-Original: "${prompt.trim()}"`;
+Add 3-4 specific angles and source types. Under 120 words. Output ONLY the enhanced prompt.`;
   }
 
   return `You are a research strategist for Indian MUN delegates.
-Rewrite this into a rich multi-angle research prompt maximizing web search quality.
+Rewrite the user's draft into a rich multi-angle research prompt maximizing web search quality.
 Rules: under 200 words, add 4-6 topic-specific research angles, mention source
 types (indices, court databases, reports), include year ranges 2022-2025.
 Output ONLY the enhanced prompt.
 Topic: ${topic.replace(/_/g, " ")}
-${angleHint}
-Original: "${prompt.trim()}"`;
+${angleHint}`;
 }
 
 export function registerAnthropicEnhanceRoute(
@@ -74,14 +73,16 @@ export function registerAnthropicEnhanceRoute(
       return;
     }
     const keys = extractKeys(req);
-    const metaPrompt = buildEnhanceMetaPrompt(prompt, mode ?? "");
+    const draft = prompt.trim();
+    const instruction = buildEnhanceInstruction(prompt, mode ?? "");
+    const metaPrompt = `${instruction}\n\nDraft:\n"${draft}"`;
 
     try {
       if (isGroqEnabled(keys.groqKey)) {
         try {
           const groq = getGroqClient(keys.groqKey);
           const resp = await groq.chat.completions.create({
-            model: "llama-3.3-70b-versatile",
+            model: remapUnavailableGroqModelId("llama-3.3-70b-versatile"),
             max_tokens: 400,
             temperature: 0.4,
             messages: [{ role: "user", content: metaPrompt }],
@@ -121,8 +122,8 @@ export function registerAnthropicEnhanceRoute(
           const text = await deps.callGeminiNonStreaming(
             gemini,
             "gemini-2.0-flash",
-            metaPrompt,
-            [{ role: "user", content: metaPrompt }],
+            instruction,
+            [{ role: "user", content: draft }],
             400,
           );
           const content = text.trim();
@@ -172,10 +173,10 @@ export function registerAnthropicEnhanceRoute(
         }
       }
 
-      res.json({ enhanced: prompt });
+      res.status(502).json({ error: "Prompt enhancement failed. Try again." });
     } catch (err) {
-      (req as any).log?.warn?.({ err }, "Enhance prompt failed, returning original");
-      res.json({ enhanced: prompt });
+      (req as any).log?.warn?.({ err }, "Enhance prompt failed");
+      res.status(502).json({ error: "Prompt enhancement failed. Try again." });
     }
   });
 }
