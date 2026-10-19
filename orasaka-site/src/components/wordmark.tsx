@@ -6,7 +6,7 @@ export function Wordmark({ size = "md" }: { size?: "md" | "lg" }) {
     const { src, width, height, alt } = brand.logo;
     return <Image src={src} width={width} height={height} alt={alt} className={size === "lg" ? "h-12 w-auto" : "h-8 w-auto"} />;
   }
-  const text = size === "lg" ? "text-2xl" : "text-base sm:text-lg";
+  const text = size === "lg" ? "text-2xl" : "text-[15px] tracking-[0.04em] sm:text-lg sm:tracking-[0.08em]";
   return (
     <span className="inline-flex items-center gap-2.5">
       <span
@@ -15,7 +15,7 @@ export function Wordmark({ size = "md" }: { size?: "md" | "lg" }) {
       >
         O
       </span>
-      <span className={`font-display font-bold tracking-[0.08em] ${text}`}>
+      <span className={`whitespace-nowrap font-display font-bold ${text}`}>
         {brand.wordmark.primary}
         <span className="ml-1.5 text-accent">{brand.wordmark.secondary}</span>
       </span>

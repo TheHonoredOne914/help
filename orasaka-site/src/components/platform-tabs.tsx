@@ -23,7 +23,7 @@ export function PlatformTabs({ platforms }: { platforms: Platform[] }) {
   }
 
   return (
-    <div>
+    <div className="min-w-0">
       <div role="tablist" aria-label="Платформа" onKeyDown={onKeyDown} className="flex gap-2 overflow-x-auto pb-2">
         {platforms.map((p, i) => (
           <button

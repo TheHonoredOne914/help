@@ -17,7 +17,7 @@ export default function ConnectPage() {
       />
       <Container className="py-14">
         <BannerFigure image={banners.connect} sizes="(min-width: 1280px) 1216px, 100vw" className="mb-12" />
-        <div className="grid items-start gap-8 lg:grid-cols-[1.4fr_0.6fr]">
+        <div className="grid grid-cols-1 items-start gap-8 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,0.6fr)]">
           <PlatformTabs platforms={platforms} />
           <Card className="lg:sticky lg:top-24">
             <h2 className="font-display text-lg font-semibold">Где взять ключ</h2>

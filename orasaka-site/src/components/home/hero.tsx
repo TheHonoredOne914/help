@@ -49,7 +49,7 @@ export function Hero() {
           <motion.h1
             id="hero-title"
             {...enter(0.08)}
-            className="font-display text-[clamp(2.75rem,9vw,6rem)] font-extrabold leading-[0.92] tracking-tight"
+            className="font-display text-[clamp(2.75rem,10vw,4.5rem)] lg:text-[clamp(3.5rem,5.8vw,5.25rem)] font-extrabold leading-[0.92] tracking-tight"
           >
             ORASAKA
             <span className="ambient block animate-glitch text-accent">VPN</span>

@@ -78,7 +78,9 @@ export function OrderView({ orderId, mode }: { orderId: string; mode: "checkout"
   return (
     <Card className="corner-frame">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="font-mono text-xs uppercase tracking-[0.2em] text-muted">Заказ {order.id}</p>
+        <p className="font-mono text-xs uppercase tracking-[0.2em] text-muted">
+          Заказ <span className="normal-case tracking-normal">{order.id}</span>
+        </p>
         {order.test ? <Badge tone="test">TEST</Badge> : null}
       </div>
 

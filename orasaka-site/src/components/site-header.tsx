@@ -47,11 +47,11 @@ function HeaderBody({ pathname }: { pathname: string }) {
   return (
     <header className="sticky top-0 z-40 border-b border-line/80 bg-bg/85 backdrop-blur-md">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
-        <Link href="/" className="rounded-md py-2" aria-label={`${brand.name} — на главную`}>
+        <Link href="/" className="min-w-0 shrink rounded-md py-2" aria-label={`${brand.name} — на главную`}>
           <Wordmark />
         </Link>
 
-        <nav aria-label="Основная навигация" className="hidden md:block">
+        <nav aria-label="Основная навигация" className="hidden lg:block">
           <ul className="flex items-center gap-1">
             {navItems.map((item) => (
               <li key={item.href}>
@@ -68,13 +68,15 @@ function HeaderBody({ pathname }: { pathname: string }) {
         </nav>
 
         <div className="flex items-center gap-2">
-          <ExternalButton href={brand.telegramBot.url} className="hidden px-4 sm:inline-flex">
-            Открыть бота
-          </ExternalButton>
+          <span className="hidden sm:block">
+            <ExternalButton href={brand.telegramBot.url} className="px-4 lg:px-5">
+              Открыть бота
+            </ExternalButton>
+          </span>
           <button
             ref={toggleRef}
             type="button"
-            className="inline-flex size-11 items-center justify-center rounded-md border border-line text-fg md:hidden"
+            className="inline-flex size-11 items-center justify-center rounded-md border border-line text-fg lg:hidden"
             aria-expanded={open}
             aria-controls={menuId}
             onClick={() => setOpen((v) => !v)}
@@ -91,7 +93,7 @@ function HeaderBody({ pathname }: { pathname: string }) {
         id={menuId}
         aria-label="Мобильная навигация"
         hidden={!open}
-        className="border-t border-line bg-bg md:hidden"
+        className="border-t border-line bg-bg lg:hidden"
       >
         <ul className="mx-auto max-w-7xl px-4 py-3 sm:px-6">
           {navItems.map((item) => (

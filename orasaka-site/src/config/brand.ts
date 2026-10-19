@@ -27,10 +27,8 @@ export const brand = {
 
 export const banners = {
   devices: { src: "/banners/devices.jpg", width: 1280, height: 720, alt: "" },
-  instructions: { src: "/banners/instructions.jpg", width: 1280, height: 720, alt: "" },
   tariffs: { src: "/banners/tariffs.jpg", width: 1280, height: 720, alt: "" },
   support: { src: "/banners/support.jpg", width: 1280, height: 720, alt: "" },
-  cabinet: { src: "/banners/cabinet.jpg", width: 1280, height: 720, alt: "" },
   connect: { src: "/banners/connect.jpg", width: 1280, height: 416, alt: "" },
 } satisfies Record<string, BrandImage>;
 
