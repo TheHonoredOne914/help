@@ -1,0 +1,384 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #080809;
+  --color-surface: #111114;
+  --color-surface-2: #18181c;
+  --color-line: #26262c;
+  /* Bright red: accents, text links, focus. 5.2:1 on bg. */
+  --color-accent: #ff2035;
+  /* Brand red: glows, borders, hover fills. */
+  --color-brand: #e50914;
+  /* Button fill: one step darker than #E50914 so the white label keeps 4.5:1+. */
+  --color-accent-strong: #d80a14;
+  --color-fg: #f5f5f5;
+  --color-muted: #b3b3bb;
+  --color-success: #3ddc97;
+  --color-warning: #ffc24b;
+
+  --font-display: var(--font-unbounded), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, monospace;
+
+  --animate-scan: scan 7s linear infinite;
+  --animate-glitch: glitch 6s steps(1) infinite;
+  --animate-pulse-glow: pulse-glow 5s ease-in-out infinite;
+  --animate-marquee: marquee 38s linear infinite;
+  --animate-float: float 7s ease-in-out infinite;
+  --animate-spin-slow: spin 60s linear infinite;
+  --animate-breathe: breathe 14s ease-in-out infinite;
+  --animate-blink: blink 1.6s steps(1) infinite;
+
+  @keyframes scan {
+    from { transform: translateY(-100%); }
+    to { transform: translateY(800%); }
+  }
+  /* Transform-only glitch: rare, tiny offsets, no flashes. */
+  @keyframes glitch {
+    0%, 92%, 100% { transform: none; }
+    93% { transform: translateX(3px) skewX(-6deg); }
+    95% { transform: translateX(-2px); }
+    96% { transform: none; }
+  }
+  @keyframes pulse-glow {
+    0%, 100% { opacity: 0.55; }
+    50% { opacity: 0.9; }
+  }
+  @keyframes marquee {
+    from { transform: translateX(0); }
+    to { transform: translateX(-50%); }
+  }
+  @keyframes float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-10px); }
+  }
+  @keyframes breathe {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.015); }
+  }
+  @keyframes blink {
+    0%, 60% { opacity: 1; }
+    61%, 100% { opacity: 0.2; }
+  }
+}
+
+/* Button light sweep on hover/focus (transform only). */
+.btn-shine {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+.btn-shine::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(110deg, transparent 30%, rgb(255 255 255 / 0.28) 50%, transparent 70%);
+  transform: translateX(-120%);
+  transition: transform 600ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.btn-shine:hover::after,
+.btn-shine:focus-visible::after {
+  transform: translateX(120%);
+}
+
+.text-outline {
+  color: transparent;
+  -webkit-text-stroke: 1px rgb(255 255 255 / 0.12);
+}
+
+/* Large blurred glows are expensive on phones: keep them smaller there. */
+@media (max-width: 767px) {
+  .glow-lg {
+    filter: blur(60px) !important;
+    opacity: 0.6;
+  }
+}
+
+html {
+  background: var(--color-bg);
+  color: var(--color-fg);
+  scroll-padding-top: 6rem;
+  -webkit-text-size-adjust: 100%;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html { scroll-behavior: smooth; }
+}
+
+body {
+  font-family: var(--font-sans);
+  overflow-x: clip;
+}
+
+::selection {
+  background: var(--color-accent-strong);
+  color: #fff;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+/* Decorative loops pause when the visitor opts out, the tab is hidden, or reduced motion is set. */
+[data-ambient="paused"] .ambient,
+[data-ambient="paused"] .ambient::before,
+[data-ambient="paused"] .ambient::after {
+  animation-play-state: paused !important;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .mobile-menu:not([hidden]) {
+    animation: menu-in 260ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  .mobile-menu:not([hidden]) .mobile-menu-item {
+    animation: menu-item-in 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+}
+@keyframes menu-in {
+  from { opacity: 0; clip-path: inset(0 0 100% 0); }
+  to { opacity: 1; clip-path: inset(0 0 0 0); }
+}
+@keyframes menu-item-in {
+  from { opacity: 0; transform: translateX(-12px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn-shine::after {
+    display: none;
+  }
+  .ambient,
+  .ambient::before,
+  .ambient::after {
+    animation: none !important;
+  }
+}
+
+.grid-lines {
+  background-image:
+    linear-gradient(to right, rgb(255 255 255 / 0.035) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(255 255 255 / 0.035) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(ellipse at 60% 30%, black 20%, transparent 75%);
+}
+
+.corner-frame {
+  position: relative;
+}
+.corner-frame::before,
+.corner-frame::after {
+  content: "";
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border-color: var(--color-accent);
+  pointer-events: none;
+}
+.corner-frame::before {
+  top: -1px;
+  left: -1px;
+  border-top: 2px solid;
+  border-left: 2px solid;
+}
+.corner-frame::after {
+  right: -1px;
+  bottom: -1px;
+  border-right: 2px solid;
+  border-bottom: 2px solid;
+}
+
+/* ── Interactive background ─────────────────────────────────────────────── */
+/* Static layer: always present (first paint, reduced data, canvas failure). */
+.fx-static {
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  pointer-events: none;
+  background:
+    radial-gradient(60rem 40rem at 18% 12%, rgb(229 9 20 / 0.16), transparent 60%),
+    radial-gradient(48rem 34rem at 88% 62%, rgb(229 9 20 / 0.09), transparent 60%),
+    linear-gradient(to right, rgb(245 245 245 / 0.025) 1px, transparent 1px) 0 0 / 72px 72px,
+    linear-gradient(to bottom, rgb(245 245 245 / 0.025) 1px, transparent 1px) 0 0 / 72px 72px,
+    var(--color-bg);
+}
+.fx-canvas {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  width: 100vw;
+  height: 100lvh;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 700ms ease;
+}
+.fx-canvas[data-ready="true"] {
+  opacity: 1;
+}
+
+/* ── ORASAKA cyber cursor ───────────────────────────────────────────────── */
+html[data-cursor="cyber"],
+html[data-cursor="cyber"] * {
+  cursor: none !important;
+}
+html[data-cursor="cyber"] input:not([type="checkbox"], [type="radio"], [type="range"], [type="button"], [type="submit"], [type="reset"]),
+html[data-cursor="cyber"] textarea,
+html[data-cursor="cyber"] [contenteditable=""],
+html[data-cursor="cyber"] [contenteditable="true"] {
+  cursor: text !important;
+}
+.cyber-cursor {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 2147483647;
+  color: var(--color-accent);
+}
+.cyber-cursor:popover-open {
+  display: block;
+}
+.cyber-cursor > * {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+.cc-pos {
+  will-change: transform;
+}
+.cc-pointer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: visible;
+  filter: drop-shadow(0 0 4px rgb(255 32 53 / 0.65));
+  transform-origin: 0 0;
+  transition: transform 120ms ease, opacity 120ms ease;
+}
+.cc-reticle {
+  position: absolute;
+  top: -20px;
+  left: -20px;
+  opacity: 0;
+  transform: scale(0.6) rotate(-45deg);
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1), opacity 140ms ease;
+  filter: drop-shadow(0 0 3px rgb(255 32 53 / 0.6));
+}
+.cyber-cursor[data-state="button"] .cc-reticle,
+.cyber-cursor[data-state="disabled"] .cc-reticle {
+  opacity: 1;
+  transform: none;
+}
+.cyber-cursor[data-state="disabled"] .cc-reticle {
+  opacity: 0.35;
+}
+.cyber-cursor[data-state="button"] .cc-pointer {
+  transform: scale(0.72);
+}
+.cyber-cursor[data-pressed="true"] .cc-pointer {
+  transform: scale(0.6);
+}
+.cyber-cursor[data-hidden="true"] .cc-pos,
+.cyber-cursor[data-hidden="true"] .cc-trail,
+.cyber-cursor[data-state="text"] .cc-pos,
+.cyber-cursor[data-state="text"] .cc-trail {
+  opacity: 0;
+}
+.cc-trail {
+  width: 3px;
+  height: 3px;
+  margin: -1.5px 0 0 -1.5px;
+  background: var(--color-accent);
+  opacity: 0;
+}
+.cc-frame {
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+.cc-frame::before,
+.cc-frame::after,
+.cc-frame > span {
+  content: "";
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-color: var(--color-accent);
+  filter: drop-shadow(0 0 4px rgb(255 32 53 / 0.7));
+}
+.cc-frame::before { top: 0; left: 0; border-top: 1.5px solid; border-left: 1.5px solid; }
+.cc-frame::after { right: 0; bottom: 0; border-right: 1.5px solid; border-bottom: 1.5px solid; }
+.cc-frame > span:first-child { top: 0; right: 0; border-top: 1.5px solid; border-right: 1.5px solid; }
+.cc-frame > span:last-child { bottom: 0; left: 0; border-bottom: 1.5px solid; border-left: 1.5px solid; }
+.cyber-cursor[data-card="true"][data-state="card"] .cc-frame {
+  opacity: 1;
+}
+.cc-pulse {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  margin: -9px 0 0 -9px;
+  border: 1.5px solid var(--color-accent);
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cc-trail,
+  .cc-pulse {
+    display: none;
+  }
+  .cc-pointer,
+  .cc-reticle,
+  .cc-frame {
+    transition: none;
+  }
+}
+
+/* ── Tilt cards ─────────────────────────────────────────────────────────── */
+.tilt {
+  position: relative;
+  transform: perspective(900px) rotateX(var(--tilt-x, 0deg)) rotateY(var(--tilt-y, 0deg));
+  transition:
+    transform 450ms cubic-bezier(0.22, 1, 0.36, 1),
+    translate 200ms ease,
+    border-color 200ms ease,
+    box-shadow 200ms ease;
+}
+.tilt[data-tilting="true"] {
+  transition:
+    transform 120ms linear,
+    translate 200ms ease,
+    border-color 200ms ease,
+    box-shadow 200ms ease;
+}
+.tilt::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: radial-gradient(320px circle at var(--mx, 50%) var(--my, 50%), rgb(255 32 53 / 0.13), transparent 62%);
+  opacity: 0;
+  transition: opacity 220ms ease;
+}
+.tilt:hover {
+  border-color: rgb(229 9 20 / 0.7);
+  box-shadow:
+    0 0 0 1px rgb(229 9 20 / 0.25),
+    0 24px 60px -28px rgb(229 9 20 / 0.7);
+}
+.tilt:hover::after {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tilt {
+    transform: none !important;
+  }
+}
