@@ -9,12 +9,11 @@ export function Wordmark({ size = "md" }: { size?: "md" | "lg" }) {
   const text = size === "lg" ? "text-2xl" : "text-[15px] tracking-[0.04em] sm:text-lg sm:tracking-[0.08em]";
   return (
     <span className="inline-flex items-center gap-2.5">
-      <span
-        aria-hidden="true"
-        className="grid size-8 shrink-0 place-items-center rounded-[6px] border border-accent/60 bg-accent/10 font-display text-[11px] font-bold text-accent"
-      >
-        O
-      </span>
+      <svg aria-hidden="true" viewBox="0 0 64 64" className="size-8 shrink-0">
+        <path d="M14 8H50L56 14V50L50 56H14L8 50V14Z" fill="rgb(229 9 20 / 0.08)" stroke="#e50914" strokeWidth="3.5" />
+        <path d="M20 20L44 30L33 33L29 45Z" fill="#ff2035" />
+        <path d="M35 36L44 44" stroke="#f5f5f5" strokeWidth="3" strokeLinecap="square" />
+      </svg>
       <span className={`whitespace-nowrap font-display font-bold ${text}`}>
         {brand.wordmark.primary}
         <span className="ml-1.5 text-accent">{brand.wordmark.secondary}</span>

@@ -76,7 +76,7 @@ function HeaderBody({ pathname }: { pathname: string }) {
           <button
             ref={toggleRef}
             type="button"
-            className="inline-flex size-11 items-center justify-center rounded-md border border-line text-fg lg:hidden"
+            className="inline-flex size-11 items-center justify-center rounded-md border border-line text-fg transition-colors hover:border-brand/70 aria-expanded:border-brand aria-expanded:text-accent lg:hidden"
             aria-expanded={open}
             aria-controls={menuId}
             onClick={() => setOpen((v) => !v)}
@@ -93,21 +93,28 @@ function HeaderBody({ pathname }: { pathname: string }) {
         id={menuId}
         aria-label="Мобильная навигация"
         hidden={!open}
-        className="border-t border-line bg-bg lg:hidden"
+        className="mobile-menu relative overflow-hidden border-t border-brand/40 bg-bg/95 backdrop-blur-md lg:hidden"
       >
-        <ul className="mx-auto max-w-7xl px-4 py-3 sm:px-6">
-          {navItems.map((item) => (
-            <li key={item.href}>
+        <span aria-hidden="true" lang="ja" className="pointer-events-none absolute -right-2 top-2 select-none font-display text-6xl font-bold text-transparent [-webkit-text-stroke:1px_rgb(229_9_20/0.18)]">
+          メニュー
+        </span>
+        <ul className="relative mx-auto max-w-7xl px-4 py-3 sm:px-6">
+          {navItems.map((item, i) => (
+            <li key={item.href} style={{ animationDelay: `${40 + i * 30}ms` }} className="mobile-menu-item border-b border-line/60 last-of-type:border-b-0">
               <Link
                 href={item.href}
                 aria-current={isActive(item.href) ? "page" : undefined}
-                className="flex min-h-12 items-center rounded-md px-3 text-base font-medium text-muted hover:text-fg aria-[current=page]:text-accent"
+                className="group flex min-h-13 items-center gap-4 rounded-md px-2 text-base font-medium text-muted transition-colors hover:text-fg aria-[current=page]:text-fg"
               >
-                {item.label}
+                <span aria-hidden="true" className="font-mono text-xs text-brand/80 group-aria-[current=page]:text-accent">
+                  {String(i + 1).padStart(2, "0")}
+                </span>
+                <span className="flex-1">{item.label}</span>
+                <span aria-hidden="true" className="h-px w-4 bg-line transition-[width,background-color] group-hover:w-8 group-hover:bg-accent group-aria-[current=page]:w-8 group-aria-[current=page]:bg-accent" />
               </Link>
             </li>
           ))}
-          <li className="pt-2">
+          <li className="mobile-menu-item pt-4" style={{ animationDelay: `${40 + navItems.length * 30}ms` }}>
             <ExternalButton href={brand.telegramBot.url} className="w-full">
               Открыть бота {brand.telegramBot.handle}
             </ExternalButton>
