@@ -112,7 +112,7 @@ export function Hero() {
           </motion.div>
           <motion.p {...enter(0.74)} className="mt-4 font-mono text-xs text-muted">
             Подключение — в Telegram-боте {brand.telegramBot.handle}.{" "}
-            <Link href="/connect" className="text-accent underline-offset-4 hover:underline">
+            <Link href="/connect" className="text-accent underline decoration-accent/50 underline-offset-4 hover:decoration-accent">
               Инструкция
             </Link>
           </motion.p>
@@ -133,8 +133,8 @@ export function Hero() {
 
         <motion.div style={{ y: parallax, opacity: fade }} className="relative order-1 lg:order-2">
           <motion.div
-            initial={{ opacity: 0, scale: reduce ? 1 : 0.94, y: reduce ? 0 : 24 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
+            initial={{ scale: reduce ? 1 : 0.96, y: reduce ? 0 : 20 }}
+            animate={{ scale: 1, y: 0 }}
             transition={{ duration: 0.7, delay: 0.15, ease }}
             onPointerMove={onPointerMove}
             onPointerLeave={onPointerLeave}
@@ -150,6 +150,7 @@ export function Hero() {
                   height={brand.hero.height}
                   alt={brand.hero.alt}
                   priority
+                  fetchPriority="high"
                   sizes="(min-width: 1280px) 720px, (min-width: 1024px) 56vw, 100vw"
                   className="h-auto w-full object-contain"
                 />
