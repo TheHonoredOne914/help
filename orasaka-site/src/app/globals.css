@@ -1,0 +1,112 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #08080b;
+  --color-surface: #14141b;
+  --color-surface-2: #1c1c25;
+  --color-line: #2a2a36;
+  --color-accent: #ff2346;
+  /* Button fill: keeps white label text above 4.5:1. */
+  --color-accent-strong: #d10f30;
+  --color-fg: #f5f5f7;
+  --color-muted: #b4b4c0;
+  --color-success: #3ddc97;
+  --color-warning: #ffc24b;
+
+  --font-display: var(--font-unbounded), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, monospace;
+
+  --animate-scan: scan 7s linear infinite;
+  --animate-glitch: glitch 6s steps(1) infinite;
+  --animate-pulse-glow: pulse-glow 5s ease-in-out infinite;
+
+  @keyframes scan {
+    from { transform: translateY(-100%); }
+    to { transform: translateY(100vh); }
+  }
+  @keyframes glitch {
+    0%, 92%, 100% { transform: none; text-shadow: none; }
+    93% { transform: translateX(2px); text-shadow: -2px 0 rgb(255 35 70 / 0.7); }
+    95% { transform: translateX(-1px); text-shadow: 2px 0 rgb(255 255 255 / 0.25); }
+  }
+  @keyframes pulse-glow {
+    0%, 100% { opacity: 0.55; }
+    50% { opacity: 0.85; }
+  }
+}
+
+html {
+  background: var(--color-bg);
+  color: var(--color-fg);
+  scroll-padding-top: 6rem;
+  -webkit-text-size-adjust: 100%;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html { scroll-behavior: smooth; }
+}
+
+body {
+  font-family: var(--font-sans);
+  overflow-x: clip;
+}
+
+::selection {
+  background: var(--color-accent-strong);
+  color: #fff;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+/* Decorative loops pause when the visitor opts out, the tab is hidden, or reduced motion is set. */
+[data-ambient="paused"] .ambient,
+[data-ambient="paused"] .ambient::before,
+[data-ambient="paused"] .ambient::after {
+  animation-play-state: paused !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ambient,
+  .ambient::before,
+  .ambient::after {
+    animation: none !important;
+  }
+}
+
+.grid-lines {
+  background-image:
+    linear-gradient(to right, rgb(255 255 255 / 0.035) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(255 255 255 / 0.035) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(ellipse at 60% 30%, black 20%, transparent 75%);
+}
+
+.corner-frame {
+  position: relative;
+}
+.corner-frame::before,
+.corner-frame::after {
+  content: "";
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border-color: var(--color-accent);
+  pointer-events: none;
+}
+.corner-frame::before {
+  top: -1px;
+  left: -1px;
+  border-top: 2px solid;
+  border-left: 2px solid;
+}
+.corner-frame::after {
+  right: -1px;
+  bottom: -1px;
+  border-right: 2px solid;
+  border-bottom: 2px solid;
+}
