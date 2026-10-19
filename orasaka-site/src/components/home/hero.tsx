@@ -10,7 +10,7 @@ const ease = [0.22, 1, 0.36, 1] as const;
 
 const chips = [
   { label: "VLESS Reality", className: "left-[-6%] top-[14%]", delay: 0.9 },
-  { label: "Happ · V2RayTun", className: "right-[-5%] top-[46%]", delay: 1.05 },
+  { label: "Happ · V2RayTun", className: "right-[-6%] top-[20%]", delay: 1.05 },
   { label: "Поддержка в Telegram", className: "left-[6%] bottom-[-5%]", delay: 1.2 },
 ];
 
@@ -97,11 +97,11 @@ export function Hero() {
             VPN-подписка в Telegram
           </motion.p>
 
-          <h1 id="hero-title" className="font-display text-[clamp(2.9rem,12vw,4.75rem)] font-extrabold leading-[0.9] tracking-tight lg:text-[clamp(3.75rem,6vw,5.75rem)]">
+          <h1 id="hero-title" className="font-display text-[clamp(2.6rem,11.5vw,4.75rem)] font-extrabold leading-[0.9] tracking-tight lg:text-[clamp(3rem,4.6vw,4.6rem)]">
             <span className="sr-only">ORASAKA VPN</span>
-            <Letters text="ORASAKA" delay={0.1} className="block" />
+            <Letters text="ORASAKA" delay={0.1} className="block whitespace-nowrap" />
             <span className="ambient block animate-glitch">
-              <Letters text="VPN" delay={0.42} className="block text-accent" />
+              <Letters text="VPN" delay={0.42} className="block whitespace-nowrap text-accent" />
             </span>
           </h1>
 

@@ -73,11 +73,9 @@ export function CheckoutForm({ initialPlan, renew }: { initialPlan: string | nul
       { planId: selectedPlan.id, paymentMethod: selectedMethod.id },
       { "idempotency-key": key },
     );
-    if (!res.ok) {
-      setBusy(false);
-      setError(API_ERROR_MESSAGE[res.error]);
-      return;
-    }
+    // Reset before navigating: the route may be restored from a hidden Activity on "back".
+    setBusy(false);
+    if (!res.ok) return setError(API_ERROR_MESSAGE[res.error]);
     router.push(res.data.checkoutUrl ?? `/checkout/${encodeURIComponent(res.data.order.id)}`);
   }
 

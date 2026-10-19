@@ -1,7 +1,7 @@
 # ORASAKA VPN — сайт (demo)
 
 Самостоятельный сайт ORASAKA VPN: Next.js 16 (App Router, Cache Components) + TypeScript strict + Tailwind CSS 4 + Motion (`motion/react`).
-Работает в **demo-режиме**: тестовые данные, оплата отключена, запросов к реальному backend нет.
+Работает в **demo-режиме**: тестовые данные, реальная оплата отключена, запросов к реальному backend нет. Состояние, mock-и и план — [`README_ORASAKA.md`](./README_ORASAKA.md); контракт backend — [`API_CONTRACT.md`](./API_CONTRACT.md).
 Официальный канал — Telegram-бот [@orasakavpn_bot](https://t.me/orasakavpn_bot).
 
 ## Запуск
@@ -21,7 +21,7 @@ npm run dev                   # http://localhost:3000
 | `npm run build` / `npm start` | production-сборка и запуск |
 | `npm run typecheck` | `next typegen` + `tsc --noEmit` |
 | `npm run lint` | ESLint (next core-web-vitals + typescript) |
-| `npm test` | Vitest: деньги, статусы заказа, идемпотентность, принадлежность заказа |
+| `npm test` | Vitest: деньги, статусы, идемпотентность, владелец заказа, платежи (подпись, replay, сверка суммы, продление) |
 | `npm run check` | всё вышеперечисленное, кроме build |
 
 ## Режимы (`.env.example`)
@@ -32,22 +32,24 @@ npm run dev                   # http://localhost:3000
 | `PAYMENTS_MODE` | `disabled` | `mock` включает тестовый in-memory checkout только в demo |
 | `DEMO_FIXTURES` | пусто | `test` — показать TEST-тарифы; без него — «Тарифы уточняются» |
 | `ENABLE_YOOKASSA`, `ENABLE_CRYPTO` | `false` | зарезервированы; в этой сборке всегда `false` |
+| `SITE_ORIGIN` | пусто | публичный origin для `returnUrl` платежей; пусто — относительные URL (demo) |
 
-Посмотреть весь тестовый поток оплаты: `DEMO_FIXTURES=test PAYMENTS_MODE=mock npm run dev` → «Тарифы» → «Оформить (тест)» → «Имитировать оплату».
+Посмотреть весь тестовый поток оплаты: `DEMO_FIXTURES=test PAYMENTS_MODE=mock npm run dev` → «Кабинет» → «Войти в демо-кабинет» → «Тарифы» → «Оформить (демо)» → выбор способа → DEMO-шлюз «Оплатить (тест)».
 Режим считывается при сборке/старте сервера; после смены переменных перезапустите `dev` или пересоберите.
 
 ## Структура
 
 ```
 src/
-  app/                  маршруты: /, /pricing, /connect, /account, /checkout/[orderId],
-                        /payment/return, /support, /legal/*; BFF: /api/plans, /api/me, /api/orders[/id]
+  app/                  маршруты: /, /pricing, /connect, /devices, /faq, /account, /checkout,
+                        /checkout/[orderId], /pay/mock/[id], /payment/{return,success,error},
+                        /support, /legal/*; BFF: /api/** (см. API_CONTRACT.md)
   components/           UI (hero, тарифы, кабинет, заказ, диалог, вкладки платформ…)
   config/brand.ts       название, бот, logo: null, hero-баннер (заменяется здесь)
   config/content.ts     тексты главной (только факты из материалов бота)
-  lib/api/              нормализованный контракт (zod), OrasakaApiClient, mock и live-клиенты
-  lib/payments/         PaymentProviderAdapter, реестр провайдеров (всё выключено)
-  lib/server/           server-only env и BFF-хелперы (Origin-проверка, no-store)
+  lib/api/              нормализованный контракт (zod), OrasakaApiClient, mock/ (MockDb, mock-клиент), live-клиент
+  lib/payments/         адаптеры провайдеров, реестр, PaymentService (verify, webhook, идемпотентность)
+  lib/server/           server-only env, runtime, BFF-хелперы (сессия, Origin, no-store), checkout
 public/banners/         оригиналы баннеров (без пересжатия); AVIF/WebP делает next/image
 tests/                  unit-тесты
 ```
@@ -55,4 +57,4 @@ tests/                  unit-тесты
 Замена hero: положите файл в `public/banners/` и поменяйте `brand.hero` в `src/config/brand.ts`.
 Логотип: задайте `brand.logo` — шапка автоматически переключится с текстового знака на изображение.
 
-См. также: `ASSET_USAGE.md`, `BACKEND_CHANGE_REQUEST.md`, `REPORT.md`.
+См. также: `README_ORASAKA.md`, `API_CONTRACT.md`, `ASSET_USAGE.md`, `REPORT.md`.

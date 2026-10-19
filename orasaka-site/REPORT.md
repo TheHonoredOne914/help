@@ -2,6 +2,18 @@
 
 Дата: 19.10.2026. Папка: `orasaka-site/` (в задании — `website/`; имя изменено по запросу владельца репозитория). Сайт не публиковался, VPS и бот не изменялись.
 
+## Итерация 2 (19.10.2026)
+
+Подробно — [`README_ORASAKA.md`](./README_ORASAKA.md) (аудит, готово, mock-и, что осталось) и [`API_CONTRACT.md`](./API_CONTRACT.md).
+
+**Аудит перед началом:** ветка и PR #4 — ORASAKA, всё в `orasaka-site/`; сайт запускался, typecheck/lint/11 тестов/build — без ошибок; 13 страниц; баннеры main/devices/tariffs/support/connect; анимации hero, reveal, глитч, scanline, свечение, параллакс; ошибок вёрстки на 6 ширинах не было. Не хватало страниц «Устройства», FAQ, выбора способа оплаты, успеха/ошибки оплаты, продления, устройств, verify/webhook-слоя и DEMO-меток.
+
+**Сделано:** анимированный hero с героиней ORASAKA; страницы `/devices`, `/faq`, `/checkout`, `/pay/mock/[id]`, `/payment/{success,error}`; кабинет (вход demo, продление, ссылка, устройства, история); адаптеры провайдеров + реестр + `PaymentService` (идемпотентность, HMAC + окно replay, дедупликация, обязательный re-fetch, сверка суммы); API-клиент по доменам с mock/live; DEMO-метки на всех mock-данных; 24 теста; E2E в Chrome без ошибок.
+
+---
+
+## Итерация 1
+
 ## Реализовано
 
 - **Стек:** Next.js 16.4.2 (App Router, Cache Components), React 19.3, TypeScript strict, Tailwind CSS 4 (`@tailwindcss/postcss`), Motion 12 (`motion/react`), zod 4, Vitest 5. Node 22 (`.nvmrc`), npm + `package-lock.json`.
@@ -17,7 +29,7 @@
 | Проверка | Результат |
 |---|---|
 | `npm run typecheck`, `npm run lint` | без ошибок и предупреждений |
-| `npm test` | 11/11: форматирование денег, отказ от float, монотонные статусы, идемпотентность, чужой заказ, одна выдача, отмена без выдачи, server-side snapshot цены |
+| `npm test` (итерация 1) | 11/11: форматирование денег, отказ от float, монотонные статусы, идемпотентность, чужой заказ, одна выдача, отмена без выдачи, server-side snapshot цены |
 | `npm run build` | успешно, 17 маршрутов (включая `icon.svg`) |
 | Ширины 360/390/768/1024/1440/1920 × 10 маршрутов | нет горизонтального скролла, нет JS-ошибок (Chrome + Playwright) |
 | Mock-поток (`DEMO_FIXTURES=test PAYMENTS_MODE=mock`) | двойной клик → 1 запрос/1 ключ; оплата → «доступ готовится» → «активен»; отмена через диалог; Escape + возврат фокуса; `/payment/return?status=success` не меняет статус |

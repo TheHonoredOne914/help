@@ -1,0 +1,106 @@
+# ORASAKA VPN — состояние сайта
+
+Папка: `orasaka-site/` (Next.js 16 App Router + TypeScript strict + Tailwind 4 + Motion 12). Telegram-бот: [@orasakavpn_bot](https://t.me/orasakavpn_bot).
+Код BestDel в корне репозитория, бот, FastAPI, Remnawave и VPS не изменялись. Реальных платежей нет.
+
+Запуск полного demo-потока:
+
+```bash
+cd orasaka-site && npm ci
+SITE_MODE=demo DEMO_FIXTURES=test PAYMENTS_MODE=mock npm run dev   # http://localhost:3000
+npm run check && npm run build                                     # typecheck + lint + 24 теста + сборка
+```
+
+Контракт для backend — [`API_CONTRACT.md`](./API_CONTRACT.md).
+
+---
+
+## 1. Аудит (до этой итерации)
+
+| Вопрос | Результат |
+|---|---|
+| Это ORASAKA? | Да: ветка `cursor/orasaka-landing-site-41e8`, PR #4, вся работа только в `orasaka-site/`; синхронизирована с remote |
+| Запускается локально? | Да: production-сервер отвечал 200; `typecheck`, `lint`, 11/11 тестов, `build` — без ошибок |
+| Страницы (13) | `/`, `/pricing`, `/connect`, `/account`, `/checkout/[orderId]`, `/payment/return`, `/support`, `/legal/{offer,privacy,refunds,contacts}`, 404 |
+| Изображения | `main.jpg` (hero), `devices.jpg`, `tariffs.jpg`, `support.jpg`, `connect.jpg`; `instructions.jpg`/`cabinet.jpg` не использовались; `trial.jpg` — нет |
+| Работающие анимации | вход hero, reveal секций при скролле, редкий глитч, scanline, пульсирующее свечение, параллакс (только desktop), кнопка остановки фоновой анимации |
+| Ошибки | 10 маршрутов × 6 ширин: без горизонтального скролла и JS-ошибок; в консоли только ожидаемые 404 для несуществующих заказов |
+| Чего не хватало | отдельных страниц «Устройства» и FAQ; выбора способа оплаты; страниц успеха/ошибки; истории покупок со ссылками; продления; управления устройствами; верификации платежа и webhook-слоя; разделения API-клиента по доменам; видимой DEMO-метки на mock-данных; крупного анимированного hero с героиней |
+
+---
+
+## 2. Готово
+
+**Дизайн и анимации**
+- Чёрно-красно-белый стиль японской киберпанк-мегакорпорации; шрифты Unbounded / Manrope / JetBrains Mono (кириллица).
+- Hero: оригинальный баннер с героиней ORASAKA; побуквенное появление заголовка; «дыхание» изображения; scanline; HUD-рамка «ORASAKA // NET»; вращающееся пунктирное кольцо; плавающие чипы (только ≥1024 px); 3D-наклон за курсором (только мышь, ≥1024 px); параллакс и затухание при скролле; бегущая строка; контурная катакана オラサカ.
+- Секции /01–/06 с рисующейся линией-разделителем, reveal при скролле, полоса прогресса прокрутки, блеск на кнопках, hover-подъём карточек.
+- Производительность: анимируются только `transform`/`opacity`; на мобильных размытие слабее, без наклона/параллакса/чипов; `prefers-reduced-motion` отключает движение (остаются только короткие fade); фоновые циклы на паузе при скрытой вкладке и по кнопке в footer.
+
+**Страницы (21)** — `/`, `/pricing`, `/connect` (вкладки, `#android|#ios|#windows|#macos`), `/devices`, `/faq` (4 раздела с якорями), `/account`, `/checkout` (выбор срока и способа оплаты), `/checkout/[orderId]`, `/pay/mock/[paymentId]` (DEMO-шлюз), `/payment/return`, `/payment/success`, `/payment/error`, `/support`, `/legal/{offer,privacy,refunds,contacts}`, 404. Использованы баннеры `main`, `devices`, `tariffs`, `support`, `connect`, `instructions`, `cabinet`.
+
+**Кабинет** — вход (demo), выход; подписка и статус выдачи; «Продлить»; ссылка подключения (маска / показать / копировать); устройства с отключением через диалог; история покупок со ссылками на заказы; сценарии demo.
+
+**Платёжная архитектура** (`src/lib/payments/`)
+- `PaymentProviderAdapter` (create / verify / validateWebhook / parseWebhook / refund?) и реестр провайдеров: mock (только demo), ЮKassa (`pending_integration`), crypto (`disabled`), Telegram Stars (`bot_only`). Новый провайдер = адаптер + строка в реестре.
+- `PaymentService`: создание платежа с ключом идемпотентности, сохранённым **до** вызова провайдера; повторный клик → тот же платёж; `verifyOrder` — перезапрос у провайдера; webhook: HMAC + окно 5 мин + constant-time, дедупликация событий, тело webhook не доверяется (всегда re-fetch), сверка id / суммы / валюты / окружения.
+- Заказ: монотонные статусы, snapshot цены на сервере, idempotent создание (ключ привязан к пользователю, конфликт при других параметрах), истечение через 30 мин, выдача доступа ровно один раз, `paid → provisioning_pending → active`. Отмена платежа оставляет заказ оплачиваемым.
+- Страницы успеха/ошибки и возврата перечитывают статус с сервера; параметры URL (`?status=success`) игнорируются.
+
+**API-клиент** (`src/lib/api/client.ts`) — `auth`, `plans`, `orders`, `subscription` (get / renew), `connection.getLink`, `devices` (list / remove). Две реализации: mock и live. BFF-маршруты: Origin-проверка мутаций, HttpOnly-сессия, `private, no-store`, лимит тела, заголовок `x-orasaka-source`.
+
+**Проверено (этой итерацией)**
+- `npm run check` (typecheck + lint + **24/24** теста) и `npm run build` — без ошибок.
+- 19 маршрутов × 6 ширин (360, 390, 768, 1024, 1280, 1440) — без горизонтального скролла; навигация из 6 пунктов помещается на 1024 px.
+- E2E в Chrome (Playwright), без ошибок в консоли:
+  - вход demo; тариф → checkout (3 недоступных способа заблокированы); двойной клик → 1 запрос / 1 ключ; DEMO-шлюз → оплата → `/payment/success` «Подписка активна»;
+  - продление → отмена на шлюзе → `/payment/error` → «Оплатить снова» → успех;
+  - подделка `/payment/success?status=success` для неоплаченного заказа показывает «Платёж ещё не подтверждён»;
+  - отмена заказа через диалог (Escape возвращает фокус); отключение устройства; сценарии demo; выход; `/connect#windows` открывает вкладку Windows.
+- Запросы с чужим Origin → 403; неподписанный webhook → 403; webhook выключенного провайдера → 404.
+- Найдено и исправлено: перенос «ORASAK / A» в hero на desktop; восстановление старого состояния страницы возврата из скрытого `Activity` (Cache Components) приводило к ложному переходу на `/payment/error` — редирект теперь срабатывает только после свежей серверной проверки.
+
+---
+
+## 3. Заглушки и mock (не реальная интеграция)
+
+Всё ниже помечено в коде комментарием `MOCK:` и в UI — меткой **⚠ DEMO** / **TEST**.
+
+| Что | Где | Поведение |
+|---|---|---|
+| База данных | `src/lib/api/mock/mock-db.ts` | в памяти процесса; сбрасывается при перезапуске |
+| API-клиент | `src/lib/api/mock/mock-client.ts` | все методы — mock; пользователь «Демо-пользователь» |
+| Тарифы | `TEST_PLANS` | суммы 1 / 3 / 12 ₽ — **заглушки, не цены**; показываются только при `DEMO_FIXTURES=test` |
+| Вход | `/api/auth/demo-login` | временный TEST-пользователь, **не Telegram** |
+| Платёжный шлюз | `providers/mock-provider.ts`, `/pay/mock/*` | имитация страницы провайдера и подписанного webhook (через 1,5 с) |
+| Ссылка подключения | `https://example.invalid/sub/TEST-…` | к VPN не подключает |
+| Устройства | `TEST · iPhone`, `TEST · Windows` | фикстуры |
+| Выдача доступа | `MockDb.fulfil` | имитация Remnawave с задержкой 4 с |
+| ЮKassa, crypto | `providers/yookassa.ts`, `providers/crypto.ts` | всегда выключены, методы бросают `ProviderDisabledError` |
+| Live-клиент | `src/lib/api/live-client.ts` | транспорт готов (таймаут, повторы GET), каждый метод возвращает `contract_unverified` |
+| Telegram-вход | `/api/auth/telegram` | возвращает 501 до согласования контракта |
+| Юридические страницы | `/legal/*` | черновики без реквизитов |
+
+---
+
+## 4. Осталось сделать
+
+**Backend (Claude Code, по `API_CONTRACT.md`)**
+1. Реализовать в FastAPI endpoints части B: `/site/auth/*`, `/plans`, `/me/orders` (+ `payments`, `verify`, `cancel`), `/me/subscription` (+ `renew`), `/me/connection`, `/me/devices`; сервисный токен `SITE_API_TOKEN`.
+2. Telegram Login: проверка HMAC и `auth_date`, replay-кэш, выдача `sessionToken`.
+3. ЮKassa в FastAPI: `Idempotence-Key`, `returnUrl` из allowlist, webhook + обязательный `GET /v3/payments/{id}`, уникальность `provider + payment_id`, outbox для Remnawave.
+4. Отдать OpenAPI-схему для сверки.
+
+**Сайт (после появления backend)**
+1. Связать методы `live-client.ts` с endpoints и zod-маппингом; хранить `sessionToken` на сервере за cookie `orasaka_sid`.
+2. Live-адаптер платежей на стороне BFF, проксирующий `POST /me/orders/{id}/payments` и `verify`.
+3. Кнопка Telegram Login Widget в кабинете.
+4. Задать `SITE_ORIGIN`; добавить CSP с nonce; Playwright/axe как постоянные тесты в CI.
+5. Staging E2E с FastAPI + Remnawave + ЮKassa sandbox.
+
+**Согласования (блокеры запуска)**
+- Логотип (сейчас текстовый знак) и финальный hero (`main.jpg` — временный).
+- Реальные цены, сроки, лимит устройств — только из backend.
+- Юридические документы и реквизиты; правовая оценка VPN-рекламы, ПДн, оферты, возвратов, фискализации; одобрение платёжного провайдера; crypto — до юридического заключения.
+- Ссылки на магазины приложений (официальные адреса не проверены).
+- `trial.jpg` не используется (обрезана надпись в оригинале).

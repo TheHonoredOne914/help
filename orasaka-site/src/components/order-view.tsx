@@ -55,19 +55,27 @@ export function OrderView({ orderId, mode }: { orderId: string; mode: "checkout"
     return () => clearInterval(id);
   }, [order, outcome, mode, reload]);
 
-  // On return from the payment page, ask the server to reconcile with the provider once.
+  // Re-runs every time the route becomes visible: cacheComponents can restore this page from a hidden
+  // Activity with a previous visit's state, so redirects stay disarmed until a fresh server verify.
   useEffect(() => {
-    if (mode !== "return" || verified.current || !order) return;
-    verified.current = true;
+    if (mode !== "return") return;
+    verified.current = false;
+    let live = true;
     postJson(path, orderSchema, { action: "verify" }).then((res) => {
+      if (!live) return;
+      verified.current = true;
       if (res.ok) setState({ status: "ready", data: res.data, source: res.source });
+      else reload({ silent: true });
     });
-  }, [mode, order, path, setState]);
+    return () => {
+      live = false;
+    };
+  }, [mode, path, setState, reload]);
 
   useEffect(() => {
-    if (mode !== "return" || !outcome || outcome === "pending") return;
+    if (mode !== "return" || !verified.current || !outcome || outcome === "pending") return;
     router.replace(`/payment/${outcome}?orderId=${encodeURIComponent(orderId)}`);
-  }, [mode, outcome, orderId, router]);
+  }, [mode, order, outcome, orderId, router]);
 
   async function act(action: "cancel" | "pay" | "verify") {
     setBusy(true);
