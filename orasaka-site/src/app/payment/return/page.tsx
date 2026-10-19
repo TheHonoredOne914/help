@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { MissingOrder } from "@/components/missing-order";
 import { OrderView } from "@/components/order-view";
 import { Skeleton } from "@/components/states";
+import { PaymentSteps } from "@/components/payment-steps";
 import { Container, PageHeader } from "@/components/ui";
 import { firstParam, type SearchParams } from "@/lib/search-params";
 
@@ -17,6 +18,7 @@ export default function PaymentReturnPage({ searchParams }: PageProps<"/payment/
         lead="Статус берётся только с сервера. Параметры адреса после возврата со страницы оплаты не подтверждают платёж."
       />
       <Container className="max-w-3xl py-14">
+        <PaymentSteps current={3} />
         <Suspense fallback={<Skeleton className="h-64 w-full" />}>
           <ReturnStatus searchParams={searchParams} />
         </Suspense>

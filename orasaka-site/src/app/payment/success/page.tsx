@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { MissingOrder } from "@/components/missing-order";
 import { PaymentOutcome } from "@/components/payment-outcome";
 import { Skeleton } from "@/components/states";
+import { PaymentSteps } from "@/components/payment-steps";
 import { Container, PageHeader } from "@/components/ui";
 import { firstParam, type SearchParams } from "@/lib/search-params";
 
@@ -13,6 +14,7 @@ export default function PaymentSuccessPage({ searchParams }: PageProps<"/payment
     <>
       <PageHeader eyebrow="Оплата" title="Спасибо за оплату" lead="Статус ниже перепроверен на сервере." />
       <Container className="max-w-3xl py-14">
+        <PaymentSteps current={4} />
         <Suspense fallback={<Skeleton className="h-64 w-full" />}>
           <Outcome searchParams={searchParams} />
         </Suspense>
