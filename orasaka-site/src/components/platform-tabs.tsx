@@ -1,10 +1,22 @@
 "use client";
 
-import { useId, useRef, useState } from "react";
+import { useId, useRef, useState, useSyncExternalStore } from "react";
 import type { Platform } from "@/config/platforms";
 
+function subscribeHash(onChange: () => void) {
+  window.addEventListener("hashchange", onChange);
+  return () => window.removeEventListener("hashchange", onChange);
+}
+
+const readHash = () => window.location.hash.slice(1);
+
 export function PlatformTabs({ platforms }: { platforms: Platform[] }) {
-  const [active, setActive] = useState(0);
+  const hash = useSyncExternalStore(subscribeHash, readHash, () => "");
+  // A hash change (e.g. a link from /devices) wins over an earlier tab click.
+  const [chosen, setChosen] = useState<{ index: number; hash: string } | null>(null);
+  const fromHash = platforms.findIndex((p) => p.id === hash);
+  const active = chosen && chosen.hash === hash ? chosen.index : Math.max(fromHash, 0);
+  const setActive = (index: number) => setChosen({ index, hash });
   const tabs = useRef<(HTMLButtonElement | null)[]>([]);
   const base = useId();
 

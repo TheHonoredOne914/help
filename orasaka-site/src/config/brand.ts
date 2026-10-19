@@ -19,7 +19,7 @@ export const brand = {
     src: "/banners/main.jpg",
     width: 1280,
     height: 720,
-    alt: "Баннер ORASAKA VPN: героиня в неоновом ночном городе и надпись «VPN-подписка в Telegram»",
+    alt: "Героиня ORASAKA в неоновом ночном городе и надпись «ORASAKA VPN — VPN-подписка в Telegram»",
   } satisfies BrandImage,
   description:
     "VPN-подписка ORASAKA через Telegram-бота: протокол VLESS Reality, приложения Happ и V2RayTun, личный кабинет и поддержка в Telegram.",
@@ -27,14 +27,18 @@ export const brand = {
 
 export const banners = {
   devices: { src: "/banners/devices.jpg", width: 1280, height: 720, alt: "" },
+  instructions: { src: "/banners/instructions.jpg", width: 1280, height: 720, alt: "" },
   tariffs: { src: "/banners/tariffs.jpg", width: 1280, height: 720, alt: "" },
   support: { src: "/banners/support.jpg", width: 1280, height: 720, alt: "" },
+  cabinet: { src: "/banners/cabinet.jpg", width: 1280, height: 720, alt: "" },
   connect: { src: "/banners/connect.jpg", width: 1280, height: 416, alt: "" },
 } satisfies Record<string, BrandImage>;
 
 export const navItems = [
   { href: "/pricing", label: "Тарифы" },
   { href: "/connect", label: "Подключение" },
+  { href: "/devices", label: "Устройства" },
+  { href: "/faq", label: "FAQ" },
   { href: "/account", label: "Кабинет" },
   { href: "/support", label: "Поддержка" },
 ] as const;

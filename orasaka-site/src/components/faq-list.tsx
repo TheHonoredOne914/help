@@ -1,6 +1,6 @@
-import { faq } from "@/config/content";
+import type { FaqItem } from "@/config/content";
 
-export function FaqList({ items = faq }: { items?: readonly { q: string; a: string }[] }) {
+export function FaqList({ items }: { items: readonly FaqItem[] }) {
   return (
     <div className="divide-y divide-line rounded-xl border border-line bg-surface/60">
       {items.map((item) => (

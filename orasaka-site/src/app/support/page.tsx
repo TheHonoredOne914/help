@@ -3,6 +3,8 @@ import { BannerFigure } from "@/components/banner-figure";
 import { FaqList } from "@/components/faq-list";
 import { Card, Container, ExternalButton, PageHeader } from "@/components/ui";
 import { banners, brand } from "@/config/brand";
+import { faqHighlights } from "@/config/content";
+import Link from "next/link";
 
 export const metadata: Metadata = { title: "Поддержка" };
 
@@ -41,7 +43,10 @@ export default function SupportPage() {
           <h2 id="support-faq" className="mb-6 font-display text-2xl font-bold">
             Частые вопросы
           </h2>
-          <FaqList />
+          <FaqList items={faqHighlights} />
+          <Link href="/faq" className="mt-4 inline-flex min-h-11 items-center text-sm font-semibold text-accent underline-offset-4 hover:underline">
+            Все вопросы →
+          </Link>
         </section>
       </Container>
     </>

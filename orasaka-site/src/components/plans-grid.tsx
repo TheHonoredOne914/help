@@ -1,16 +1,14 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useRef, useState } from "react";
 import { brand } from "@/config/brand";
-import { API_ERROR_MESSAGE, orderSchema, plansResponseSchema } from "@/lib/api/types";
-import { fetchJson } from "@/lib/fetch-json";
-import { useApi } from "@/lib/use-api";
+import { paymentMethodsResponseSchema, plansResponseSchema } from "@/lib/api/types";
 import { formatMoney } from "@/lib/money";
+import { useApi } from "@/lib/use-api";
+import { DemoMarker } from "./demo-marker";
 import { EmptyState, ErrorState, LoadingCards } from "./states";
-import { Badge, Button, ExternalButton } from "./ui";
+import { Badge, ButtonLink, ExternalButton } from "./ui";
 
-function monthsLabel(n: number) {
+export function monthsLabel(n: number) {
   const mod10 = n % 10;
   const mod100 = n % 100;
   if (mod10 === 1 && mod100 !== 11) return `${n} месяц`;
@@ -20,36 +18,15 @@ function monthsLabel(n: number) {
 
 export function PlansGrid({ headingLevel = 3 }: { headingLevel?: 2 | 3 }) {
   const { state, reload } = useApi("/api/plans", plansResponseSchema);
-  const [pending, setPending] = useState<string | null>(null);
-  const [orderError, setOrderError] = useState<string | null>(null);
-  const keys = useRef(new Map<string, string>());
-  const router = useRouter();
+  const methods = useApi("/api/payments/methods", paymentMethodsResponseSchema);
   const H = `h${headingLevel}` as "h2" | "h3";
-
-  async function order(planId: string) {
-    if (pending) return;
-    // One idempotency key per plan selection, reused on retries/double clicks.
-    let key = keys.current.get(planId);
-    if (!key) {
-      key = crypto.randomUUID();
-      keys.current.set(planId, key);
-    }
-    setPending(planId);
-    setOrderError(null);
-    const res = await fetchJson("/api/orders", orderSchema, {
-      method: "POST",
-      headers: { "content-type": "application/json", "idempotency-key": key },
-      body: JSON.stringify({ planId }),
-    });
-    setPending(null);
-    if (res.ok) router.push(`/checkout/${encodeURIComponent(res.data.id)}`);
-    else setOrderError(API_ERROR_MESSAGE[res.error]);
-  }
 
   if (state.status === "loading") return <LoadingCards label="Загружаем тарифы…" />;
   if (state.status === "error") return <ErrorState error={state.error} onRetry={() => reload()} />;
 
-  const { plans, checkout } = state.data;
+  const { plans } = state.data;
+  const siteCheckout = methods.state.status === "ready" && methods.state.data.mode === "mock";
+
   if (plans.length === 0) {
     return (
       <EmptyState title="Тарифы уточняются">
@@ -63,9 +40,18 @@ export function PlansGrid({ headingLevel = 3 }: { headingLevel?: 2 | 3 }) {
 
   return (
     <div>
+      <div className="mb-4 flex min-h-6 flex-wrap items-center gap-3">
+        <DemoMarker source={state.source} label="DEMO · суммы-заглушки, не цены" />
+      </div>
       <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {plans.map((plan) => (
-          <li key={plan.id} className="flex flex-col rounded-xl border border-line bg-surface p-6 transition-colors duration-150 hover:border-accent/60">
+        {plans.map((plan, i) => (
+          <li
+            key={plan.id}
+            className={`group relative flex flex-col overflow-hidden rounded-xl border bg-surface p-6 transition-[border-color,transform] duration-200 hover:-translate-y-1 hover:border-accent/70 ${
+              i === 1 ? "border-accent/50" : "border-line"
+            }`}
+          >
+            <span aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-accent to-transparent opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
             <div className="flex items-start justify-between gap-3">
               <H className="font-display text-lg font-semibold">{plan.title}</H>
               {plan.test ? <Badge tone="test">TEST</Badge> : null}
@@ -87,10 +73,10 @@ export function PlansGrid({ headingLevel = 3 }: { headingLevel?: 2 | 3 }) {
               </ul>
             ) : null}
             <div className="mt-auto pt-6">
-              {checkout.mode === "mock" && plan.prices.some((p) => p.currency === "RUB") ? (
-                <Button className="w-full" onClick={() => order(plan.id)} disabled={pending !== null} aria-busy={pending === plan.id}>
-                  {pending === plan.id ? "Создаём заказ…" : "Оформить (тест)"}
-                </Button>
+              {siteCheckout && plan.prices.some((p) => p.currency === "RUB") ? (
+                <ButtonLink href={`/checkout?plan=${encodeURIComponent(plan.id)}`} className="w-full">
+                  Оформить (демо)
+                </ButtonLink>
               ) : (
                 <ExternalButton href={brand.telegramBot.url} className="w-full">
                   Оформить в боте
@@ -100,9 +86,6 @@ export function PlansGrid({ headingLevel = 3 }: { headingLevel?: 2 | 3 }) {
           </li>
         ))}
       </ul>
-      <p role="status" aria-live="polite" className="mt-4 text-sm text-accent">
-        {orderError}
-      </p>
     </div>
   );
 }

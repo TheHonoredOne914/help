@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { JetBrains_Mono, Manrope, Unbounded } from "next/font/google";
+import { ScrollProgress } from "@/components/motion";
 import { Providers } from "@/components/providers";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
@@ -11,7 +12,8 @@ const unbounded = Unbounded({ variable: "--font-unbounded", subsets: ["latin", "
 const manrope = Manrope({ variable: "--font-manrope", subsets: ["latin", "cyrillic"] });
 const jetbrains = JetBrains_Mono({ variable: "--font-jetbrains", subsets: ["latin", "cyrillic"], weight: ["400", "500"] });
 
-const isDemo = getServerEnv().siteMode === "demo";
+const env = getServerEnv();
+const isDemo = env.siteMode === "demo";
 
 export const metadata: Metadata = {
   title: { default: `${brand.name} — VPN-подписка в Telegram`, template: `%s · ${brand.name}` },
@@ -38,10 +40,13 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         {isDemo ? (
           <div role="note" className="border-b border-warning/30 bg-warning/10 px-4 py-2 text-center text-xs font-medium text-warning sm:text-sm">
             <span aria-hidden="true">⚠ </span>
-            Демо-режим: данные тестовые, оплата на сайте отключена. Подписка оформляется в Telegram-боте.
+            {env.paymentsMode === "mock"
+              ? "DEMO: тестовые данные и тестовая оплата — реальные деньги не списываются. Настоящая подписка оформляется в Telegram-боте."
+              : "Демо-режим: данные тестовые, оплата на сайте отключена. Подписка оформляется в Telegram-боте."}
           </div>
         ) : null}
         <Providers>
+          <ScrollProgress />
           <SiteHeader />
           <main id="main" tabIndex={-1} className="flex-1 outline-none">
             {children}

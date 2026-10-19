@@ -12,6 +12,7 @@ const nextConfig: NextConfig = {
   cacheComponents: true,
   partialPrefetching: true,
   poweredByHeader: false,
+  devIndicators: false,
   productionBrowserSourceMaps: false,
   images: { formats: ["image/avif", "image/webp"] },
   turbopack: {

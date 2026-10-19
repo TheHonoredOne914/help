@@ -4,12 +4,12 @@ import type { ComponentProps } from "react";
 type Variant = "primary" | "secondary" | "ghost";
 
 const base =
-  "inline-flex min-h-11 items-center justify-center gap-2 rounded-md px-5 text-sm font-semibold tracking-wide transition-[background-color,border-color,color,transform,box-shadow] duration-150 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50";
+  "inline-flex min-h-11 items-center justify-center gap-2 rounded-md px-5 text-sm font-semibold tracking-wide transition-[background-color,border-color,color,transform] duration-150 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50";
 
 const variants: Record<Variant, string> = {
   primary:
-    "bg-accent-strong text-white shadow-[0_0_24px_-6px_rgb(255_35_70/0.7)] hover:bg-[#e3143a] hover:shadow-[0_0_32px_-4px_rgb(255_35_70/0.85)]",
-  secondary: "border border-line bg-surface text-fg hover:border-accent/70 hover:bg-surface-2",
+    "btn-shine bg-accent-strong text-white shadow-[0_0_24px_-6px_rgb(255_35_70/0.7)] hover:bg-[#e3143a]",
+  secondary: "btn-shine border border-line bg-surface text-fg hover:border-accent/70 hover:bg-surface-2",
   ghost: "text-muted hover:text-fg",
 };
 

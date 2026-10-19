@@ -20,19 +20,75 @@
   --animate-scan: scan 7s linear infinite;
   --animate-glitch: glitch 6s steps(1) infinite;
   --animate-pulse-glow: pulse-glow 5s ease-in-out infinite;
+  --animate-marquee: marquee 38s linear infinite;
+  --animate-float: float 7s ease-in-out infinite;
+  --animate-spin-slow: spin 60s linear infinite;
+  --animate-breathe: breathe 14s ease-in-out infinite;
+  --animate-blink: blink 1.6s steps(1) infinite;
 
   @keyframes scan {
     from { transform: translateY(-100%); }
-    to { transform: translateY(100vh); }
+    to { transform: translateY(800%); }
   }
+  /* Transform-only glitch: rare, tiny offsets, no flashes. */
   @keyframes glitch {
-    0%, 92%, 100% { transform: none; text-shadow: none; }
-    93% { transform: translateX(2px); text-shadow: -2px 0 rgb(255 35 70 / 0.7); }
-    95% { transform: translateX(-1px); text-shadow: 2px 0 rgb(255 255 255 / 0.25); }
+    0%, 92%, 100% { transform: none; }
+    93% { transform: translateX(3px) skewX(-6deg); }
+    95% { transform: translateX(-2px); }
+    96% { transform: none; }
   }
   @keyframes pulse-glow {
     0%, 100% { opacity: 0.55; }
-    50% { opacity: 0.85; }
+    50% { opacity: 0.9; }
+  }
+  @keyframes marquee {
+    from { transform: translateX(0); }
+    to { transform: translateX(-50%); }
+  }
+  @keyframes float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-10px); }
+  }
+  @keyframes breathe {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.025); }
+  }
+  @keyframes blink {
+    0%, 60% { opacity: 1; }
+    61%, 100% { opacity: 0.2; }
+  }
+}
+
+/* Button light sweep on hover/focus (transform only). */
+.btn-shine {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+.btn-shine::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(110deg, transparent 30%, rgb(255 255 255 / 0.28) 50%, transparent 70%);
+  transform: translateX(-120%);
+  transition: transform 600ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.btn-shine:hover::after,
+.btn-shine:focus-visible::after {
+  transform: translateX(120%);
+}
+
+.text-outline {
+  color: transparent;
+  -webkit-text-stroke: 1px rgb(255 255 255 / 0.12);
+}
+
+/* Large blurred glows are expensive on phones: keep them smaller there. */
+@media (max-width: 767px) {
+  .glow-lg {
+    filter: blur(60px) !important;
+    opacity: 0.6;
   }
 }
 
@@ -71,6 +127,9 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .btn-shine::after {
+    display: none;
+  }
   .ambient,
   .ambient::before,
   .ambient::after {

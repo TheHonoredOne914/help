@@ -1,18 +1,38 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
 import { brand } from "@/config/brand";
-import { API_ERROR_MESSAGE, orderSchema } from "@/lib/api/types";
-import { fetchJson } from "@/lib/fetch-json";
+import { API_ERROR_MESSAGE, checkoutResponseSchema, orderSchema, type Order } from "@/lib/api/types";
+import { fetchJson, postJson } from "@/lib/fetch-json";
 import { formatMoney } from "@/lib/money";
 import { isPolling, ORDER_STATUS_META } from "@/lib/order-status";
 import { useApi } from "@/lib/use-api";
 import { ConfirmDialog } from "./confirm-dialog";
+import { DemoMarker } from "./demo-marker";
 import { formatDate, OrderStatusBadge } from "./order-status-badge";
 import { EmptyState, ErrorState, Skeleton } from "./states";
 import { Badge, Button, ButtonLink, Card, ExternalButton } from "./ui";
 
 const POLL_MS = 3000;
+
+const PAYMENT_STATUS_LABEL: Record<NonNullable<Order["paymentStatus"]>, string> = {
+  pending: "ожидает оплаты",
+  succeeded: "подтверждён платёжным сервисом",
+  canceled: "отменён",
+  failed: "не прошёл",
+  expired: "истёк",
+};
+
+export type OrderOutcome = "success" | "error" | "pending";
+
+/** Derived only from server data: a URL parameter never decides the outcome. */
+export function orderOutcome(order: Order): OrderOutcome {
+  if (["paid", "provisioning_pending", "active"].includes(order.status)) return "success";
+  if (["failed", "expired", "cancelled"].includes(order.status)) return "error";
+  if (order.paymentStatus && ["canceled", "failed", "expired"].includes(order.paymentStatus)) return "error";
+  return "pending";
+}
 
 export function OrderView({ orderId, mode }: { orderId: string; mode: "checkout" | "return" }) {
   const path = `/api/orders/${encodeURIComponent(orderId)}`;
@@ -20,27 +40,53 @@ export function OrderView({ orderId, mode }: { orderId: string; mode: "checkout"
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const router = useRouter();
+  const verified = useRef(false);
 
-  const status = state.status === "ready" ? state.data.status : null;
+  const order = state.status === "ready" ? state.data : null;
+  const outcome = order ? orderOutcome(order) : null;
 
   useEffect(() => {
-    if (!status || !isPolling(status)) return;
+    if (!order || !isPolling(order.status)) return;
+    if (mode === "return" && outcome === "error") return;
     const id = setInterval(() => {
       if (!document.hidden) reload({ silent: true });
     }, POLL_MS);
     return () => clearInterval(id);
-  }, [status, reload]);
+  }, [order, outcome, mode, reload]);
 
-  async function act(action: "cancel" | "mock_pay") {
+  // On return from the payment page, ask the server to reconcile with the provider once.
+  useEffect(() => {
+    if (mode !== "return" || verified.current || !order) return;
+    verified.current = true;
+    postJson(path, orderSchema, { action: "verify" }).then((res) => {
+      if (res.ok) setState({ status: "ready", data: res.data, source: res.source });
+    });
+  }, [mode, order, path, setState]);
+
+  useEffect(() => {
+    if (mode !== "return" || !outcome || outcome === "pending") return;
+    router.replace(`/payment/${outcome}?orderId=${encodeURIComponent(orderId)}`);
+  }, [mode, outcome, orderId, router]);
+
+  async function act(action: "cancel" | "pay" | "verify") {
     setBusy(true);
     setActionError(null);
+    if (action === "pay") {
+      const res = await postJson(path, checkoutResponseSchema, { action });
+      setBusy(false);
+      if (!res.ok) return setActionError(API_ERROR_MESSAGE[res.error]);
+      if (res.data.checkoutUrl) return router.push(res.data.checkoutUrl);
+      setState({ status: "ready", data: res.data.order, source: res.source });
+      return;
+    }
     const res = await fetchJson(path, orderSchema, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ action }),
     });
     setBusy(false);
-    if (res.ok) setState({ status: "ready", data: res.data });
+    if (res.ok) setState({ status: "ready", data: res.data, source: res.source });
     else setActionError(API_ERROR_MESSAGE[res.error]);
   }
 
@@ -56,10 +102,10 @@ export function OrderView({ orderId, mode }: { orderId: string; mode: "checkout"
   }
 
   if (state.status === "error") {
-    if (state.error === "not_found") {
+    if (state.error === "not_found" || state.error === "unauthorized") {
       return (
         <EmptyState title="Заказ не найден">
-          <p>Заказа с таким номером нет или он принадлежит другому аккаунту.</p>
+          <p>Заказа с таким номером нет, он принадлежит другому аккаунту или демо-сессия истекла.</p>
           <div className="mt-5 flex flex-wrap justify-center gap-3">
             <ButtonLink href="/pricing">К тарифам</ButtonLink>
             <ExternalButton href={brand.telegramBot.url} variant="secondary">
@@ -72,68 +118,76 @@ export function OrderView({ orderId, mode }: { orderId: string; mode: "checkout"
     return <ErrorState error={state.error} onRetry={() => reload()} />;
   }
 
-  const order = state.data;
-  const meta = ORDER_STATUS_META[order.status];
+  const o = state.data;
+  const meta = ORDER_STATUS_META[o.status];
 
   return (
     <Card className="corner-frame">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="font-mono text-xs uppercase tracking-[0.2em] text-muted">
-          Заказ <span className="normal-case tracking-normal">{order.id}</span>
+          {o.kind === "renewal" ? "Продление" : "Заказ"} <span className="normal-case tracking-normal">{o.id}</span>
         </p>
-        {order.test ? <Badge tone="test">TEST</Badge> : null}
+        <div className="flex flex-wrap gap-2">
+          <DemoMarker source={state.source} />
+          {o.test ? <Badge tone="test">TEST</Badge> : null}
+        </div>
       </div>
 
-      <div className="mt-6 grid gap-6 sm:grid-cols-2">
+      <div className="mt-6 grid gap-6 sm:grid-cols-3">
         <div>
           <p className="text-sm text-muted">Тариф</p>
-          <p className="mt-1 font-display text-xl font-semibold">{order.planTitle}</p>
+          <p className="mt-1 font-display text-xl font-semibold">{o.planTitle}</p>
         </div>
         <div>
-          <p className="text-sm text-muted">Сумма, зафиксированная в заказе</p>
-          <p className="mt-1 font-display text-xl font-semibold">{formatMoney(order.amount)}</p>
+          <p className="text-sm text-muted">Сумма в заказе</p>
+          <p className="mt-1 font-display text-xl font-semibold">{formatMoney(o.amount)}</p>
+        </div>
+        <div>
+          <p className="text-sm text-muted">Способ оплаты</p>
+          <p className="mt-1 font-semibold">{o.paymentMethod === "mock" ? "Тестовая оплата (DEMO)" : (o.paymentMethod ?? "—")}</p>
         </div>
       </div>
 
       <div aria-live="polite" aria-atomic="true" className="mt-8 rounded-lg border border-line bg-bg p-5">
-        <OrderStatusBadge status={order.status} />
+        <OrderStatusBadge status={o.status} />
         <p className="mt-3 leading-relaxed text-muted">{meta.description}</p>
-        {mode === "return" && order.status === "awaiting_payment" ? (
+        {o.paymentStatus ? (
+          <p className="mt-2 text-sm text-muted">Последний платёж: {PAYMENT_STATUS_LABEL[o.paymentStatus]}.</p>
+        ) : null}
+        {mode === "return" && outcome === "pending" ? (
           <p className="mt-2 text-sm text-muted">
-            Возврат со страницы оплаты не подтверждает платёж. Статус обновится после подтверждения платёжным сервисом.
+            Возврат со страницы оплаты не подтверждает платёж. Ждём подтверждения от платёжного сервиса.
           </p>
         ) : null}
-        {isPolling(order.status) ? (
+        {isPolling(o.status) ? (
           <p className="mt-2 font-mono text-xs text-muted">Проверяем статус автоматически каждые {POLL_MS / 1000} с.</p>
         ) : null}
-        {order.expiresAt && order.status === "awaiting_payment" ? (
-          <p className="mt-2 text-sm text-muted">Оплатить до {formatDate(order.expiresAt)}</p>
+        {o.expiresAt && o.status === "awaiting_payment" ? (
+          <p className="mt-2 text-sm text-muted">Оплатить до {formatDate(o.expiresAt)}</p>
         ) : null}
       </div>
 
       <div className="mt-6 flex flex-wrap gap-3">
-        {order.status === "awaiting_payment" ? (
+        {o.status === "awaiting_payment" ? (
           <>
-            {order.test ? (
-              <Button onClick={() => act("mock_pay")} disabled={busy}>
-                Имитировать оплату (тест)
-              </Button>
-            ) : null}
+            <Button onClick={() => act("pay")} disabled={busy} aria-busy={busy}>
+              {o.paymentStatus === "pending" ? "Перейти к оплате" : "Оплатить снова"}
+            </Button>
             <Button variant="secondary" onClick={() => setConfirmCancel(true)} disabled={busy}>
               Отменить заказ
             </Button>
           </>
         ) : null}
-        {order.status === "active" ? <ButtonLink href="/account">Перейти в кабинет</ButtonLink> : null}
-        {meta.final && order.status !== "active" ? <ButtonLink href="/pricing">Выбрать тариф заново</ButtonLink> : null}
-        <Button variant="ghost" onClick={() => reload({ silent: true })}>
-          Проверить снова
+        {o.status === "active" ? <ButtonLink href="/account">Перейти в кабинет</ButtonLink> : null}
+        {meta.final && o.status !== "active" ? <ButtonLink href="/pricing">Выбрать тариф заново</ButtonLink> : null}
+        <Button variant="ghost" onClick={() => act("verify")} disabled={busy}>
+          Проверить статус
         </Button>
       </div>
 
-      {order.test ? (
+      {o.test ? (
         <p className="mt-4 text-xs text-muted">
-          Тестовый заказ: вместо страницы платёжного сервиса используется имитация. Реальные деньги не списываются.
+          Тестовый заказ: вместо страницы платёжного сервиса используется DEMO-шлюз. Реальные деньги не списываются.
         </p>
       ) : null}
       <p role="alert" className="mt-3 text-sm text-accent">
