@@ -5,6 +5,7 @@ import { paymentMethodsResponseSchema, plansResponseSchema } from "@/lib/api/typ
 import { formatMoney } from "@/lib/money";
 import { useApi } from "@/lib/use-api";
 import { DemoMarker } from "./demo-marker";
+import { Tilt } from "./fx/tilt";
 import { EmptyState, ErrorState, LoadingCards } from "./states";
 import { Badge, ButtonLink, ExternalButton } from "./ui";
 
@@ -45,10 +46,11 @@ export function PlansGrid({ headingLevel = 3 }: { headingLevel?: 2 | 3 }) {
       </div>
       <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {plans.map((plan, i) => (
-          <li
+          <Tilt
+            as="li"
             key={plan.id}
-            className={`group relative flex flex-col overflow-hidden rounded-xl border bg-surface p-6 transition-[border-color,transform] duration-200 hover:-translate-y-1 hover:border-accent/70 ${
-              i === 1 ? "border-accent/50" : "border-line"
+            className={`group flex flex-col overflow-hidden rounded-xl border bg-surface p-6 hover:-translate-y-1 ${
+              i === 1 ? "border-brand/50" : "border-line"
             }`}
           >
             <span aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-accent to-transparent opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
@@ -83,7 +85,7 @@ export function PlansGrid({ headingLevel = 3 }: { headingLevel?: 2 | 3 }) {
                 </ExternalButton>
               )}
             </div>
-          </li>
+          </Tilt>
         ))}
       </ul>
     </div>

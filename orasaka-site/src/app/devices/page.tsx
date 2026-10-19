@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { BannerFigure } from "@/components/banner-figure";
 import { Reveal } from "@/components/motion";
+import { Tilt } from "@/components/fx/tilt";
 import { PlatformIcon } from "@/components/platform-icon";
 import { ButtonLink, Card, Container, ExternalButton, PageHeader, SectionHeading } from "@/components/ui";
 import { banners, brand } from "@/config/brand";
@@ -43,7 +44,7 @@ export default function DevicesPage() {
           <ul className="grid gap-4 sm:grid-cols-2">
             {platforms.map((p, i) => (
               <Reveal as="li" key={p.id} delay={i * 0.05}>
-                <Card className="group flex h-full flex-col transition-[border-color,transform] duration-200 hover:-translate-y-1 hover:border-accent/60">
+                <Tilt className="group flex h-full flex-col rounded-xl border border-line bg-surface/80 p-6 hover:-translate-y-1">
                   <div className="flex items-center gap-3">
                     <span className="grid size-11 place-items-center rounded-lg border border-line bg-bg text-accent transition-colors duration-200 group-hover:border-accent/60">
                       <PlatformIcon name={p.icon} />
@@ -60,7 +61,7 @@ export default function DevicesPage() {
                   >
                     Инструкция для {p.name.split(" ")[0]} →
                   </Link>
-                </Card>
+                </Tilt>
               </Reveal>
             ))}
           </ul>

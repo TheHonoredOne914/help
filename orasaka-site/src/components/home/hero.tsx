@@ -4,15 +4,10 @@ import { motion, useMotionValue, useReducedMotion, useScroll, useSpring, useTran
 import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 import { brand } from "@/config/brand";
+import Link from "next/link";
 import { ButtonLink, ExternalButton } from "@/components/ui";
 
 const ease = [0.22, 1, 0.36, 1] as const;
-
-const chips = [
-  { label: "VLESS Reality", className: "left-[-6%] top-[14%]", delay: 0.9 },
-  { label: "Happ · V2RayTun", className: "right-[-6%] top-[20%]", delay: 1.05 },
-  { label: "Поддержка в Telegram", className: "left-[6%] bottom-[-5%]", delay: 1.2 },
-];
 
 /** Desktop-class pointer and width: enables tilt and parallax. */
 function useRichMotion() {
@@ -78,10 +73,7 @@ export function Hero() {
   });
 
   return (
-    <section ref={sectionRef} aria-labelledby="hero-title" className="relative isolate overflow-hidden border-b border-line">
-      <div aria-hidden="true" className="grid-lines absolute inset-0 -z-10" />
-      <div aria-hidden="true" className="glow-lg ambient absolute -left-48 top-0 -z-10 size-[38rem] animate-pulse-glow rounded-full bg-accent/25 blur-[140px]" />
-      <div aria-hidden="true" className="glow-lg absolute -right-40 bottom-0 -z-10 size-[30rem] rounded-full bg-accent/15 blur-[120px]" />
+    <section ref={sectionRef} data-scene="home" aria-labelledby="hero-title" className="relative isolate overflow-hidden border-b border-line">
       <p
         aria-hidden="true"
         lang="ja"
@@ -111,16 +103,19 @@ export function Hero() {
           </motion.p>
 
           <motion.div {...enter(0.68)} className="mt-9 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-            <ButtonLink href="/pricing" className="px-7">
-              Тарифы
-            </ButtonLink>
-            <ButtonLink href="/connect" variant="secondary" className="px-7">
-              Как подключиться
-            </ButtonLink>
-            <ExternalButton href={brand.telegramBot.url} variant="ghost">
-              {brand.telegramBot.handle} <span aria-hidden="true">→</span>
+            <ExternalButton href={brand.telegramBot.url} className="px-8 uppercase tracking-[0.14em]">
+              Подключиться
             </ExternalButton>
+            <ButtonLink href="/pricing" variant="secondary" className="px-8 uppercase tracking-[0.14em]">
+              Выбрать тариф
+            </ButtonLink>
           </motion.div>
+          <motion.p {...enter(0.74)} className="mt-4 font-mono text-xs text-muted">
+            Подключение — в Telegram-боте {brand.telegramBot.handle}.{" "}
+            <Link href="/connect" className="text-accent underline-offset-4 hover:underline">
+              Инструкция
+            </Link>
+          </motion.p>
 
           <motion.dl {...enter(0.8)} className="mt-10 grid max-w-md grid-cols-3 gap-4 border-t border-line pt-6 font-mono text-[11px] uppercase tracking-widest">
             {[
@@ -137,13 +132,6 @@ export function Hero() {
         </div>
 
         <motion.div style={{ y: parallax, opacity: fade }} className="relative order-1 lg:order-2">
-          <div aria-hidden="true" className="absolute inset-0 -z-10 hidden items-center justify-center md:flex">
-            <svg viewBox="0 0 400 400" className="ambient size-[115%] animate-spin-slow text-accent/30">
-              <circle cx="200" cy="200" r="190" fill="none" stroke="currentColor" strokeWidth="1" strokeDasharray="2 10" />
-              <circle cx="200" cy="200" r="160" fill="none" stroke="currentColor" strokeWidth="0.6" strokeDasharray="40 14 4 14" />
-            </svg>
-          </div>
-
           <motion.div
             initial={{ opacity: 0, scale: reduce ? 1 : 0.94, y: reduce ? 0 : 24 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -153,8 +141,8 @@ export function Hero() {
             style={{ rotateX, rotateY, transformPerspective: 1200 }}
             className="relative"
           >
-            <div aria-hidden="true" className="glow-lg absolute -inset-8 -z-10 rounded-[2rem] bg-accent/25 blur-3xl" />
-            <div className="corner-frame relative overflow-hidden rounded-2xl border border-accent/40 bg-black shadow-[0_40px_120px_-40px_rgb(255_35_70/0.75)]">
+            <div aria-hidden="true" className="glow-lg absolute -inset-6 -z-10 rounded-[2rem] bg-brand/20 blur-3xl" />
+            <div className="corner-frame relative overflow-hidden rounded-2xl border border-brand/45 bg-black shadow-[0_40px_120px_-40px_rgb(229_9_20/0.8)]">
               <div className="ambient animate-breathe">
                 <Image
                   src={brand.hero.src}
@@ -173,25 +161,9 @@ export function Hero() {
                 <span className="flex items-center gap-2">
                   <span className="ambient size-1.5 animate-blink rounded-full bg-accent" /> ORASAKA // NET
                 </span>
-                <span lang="ja">オラサカ</span>
               </div>
             </div>
 
-            {chips.map((c) => (
-              <motion.span
-                key={c.label}
-                aria-hidden="true"
-                initial={{ opacity: 0, y: reduce ? 0 : 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.45, delay: c.delay, ease }}
-                className={`absolute hidden lg:block ${c.className}`}
-              >
-                <span className="ambient block animate-float rounded-md border border-accent/40 bg-bg/85 px-3 py-2 font-mono text-[11px] uppercase tracking-widest text-fg shadow-[0_10px_30px_-10px_rgb(255_35_70/0.6)] backdrop-blur-sm">
-                  <span className="mr-2 text-accent">▍</span>
-                  {c.label}
-                </span>
-              </motion.span>
-            ))}
           </motion.div>
         </motion.div>
       </div>

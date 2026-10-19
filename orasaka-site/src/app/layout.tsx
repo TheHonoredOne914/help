@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { JetBrains_Mono, Manrope, Unbounded } from "next/font/google";
+import { CyberBackground } from "@/components/fx/cyber-background";
+import { CyberCursor } from "@/components/fx/cyber-cursor";
 import { ScrollProgress } from "@/components/motion";
 import { Providers } from "@/components/providers";
 import { SiteFooter } from "@/components/site-footer";
@@ -23,7 +25,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#08080b",
+  themeColor: "#080809",
   colorScheme: "dark",
 };
 
@@ -45,6 +47,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
               : "Демо-режим: данные тестовые, оплата на сайте отключена. Подписка оформляется в Telegram-боте."}
           </div>
         ) : null}
+        <CyberBackground />
         <Providers>
           <ScrollProgress />
           <SiteHeader />
@@ -53,6 +56,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           </main>
           <SiteFooter />
         </Providers>
+        <CyberCursor />
       </body>
     </html>
   );

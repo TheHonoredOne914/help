@@ -2,6 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { BannerFigure } from "@/components/banner-figure";
 import { FaqList } from "@/components/faq-list";
+import { Tilt } from "@/components/fx/tilt";
 import { Hero } from "@/components/home/hero";
 import { Reveal, SectionRule } from "@/components/motion";
 import { PlansGrid } from "@/components/plans-grid";
@@ -15,25 +16,21 @@ export default function HomePage() {
     <>
       <Hero />
 
-      <section aria-labelledby="features-title" className="pt-20 pb-20 sm:pt-24 sm:pb-24">
+      <section data-scene="home" aria-labelledby="features-title" className="pt-20 pb-20 sm:pt-24 sm:pb-24">
         <SectionRule index="01" />
         <Container className="mt-10">
           <SectionHeading id="features-title" eyebrow="Возможности" title="Что входит в подписку" />
           <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {features.map((f, i) => (
-              <Reveal
-                as="li"
-                key={f.code}
-                delay={i * 0.06}
-                className="group relative overflow-hidden rounded-xl border border-line bg-surface p-6 transition-[border-color,transform] duration-200 hover:-translate-y-1 hover:border-accent/60"
-              >
+              <Reveal as="li" key={f.code} delay={i * 0.06}>
+                <Tilt className="group h-full overflow-hidden rounded-xl border border-line bg-surface p-6 hover:-translate-y-1">
                 <span aria-hidden="true" className="font-mono text-xs text-accent">
                   /{f.code}
                 </span>
                 <h3 className="mt-4 font-display text-lg font-semibold">{f.title}</h3>
                 <p className="mt-2 text-sm leading-relaxed text-muted">{f.text}</p>
                 <span aria-hidden="true" className="absolute inset-x-0 bottom-0 h-0.5 origin-left scale-x-0 bg-accent transition-transform duration-300 group-hover:scale-x-100" />
-                <span aria-hidden="true" className="absolute -right-10 -top-10 size-24 rounded-full bg-accent/0 opacity-0 blur-2xl transition-opacity duration-300 group-hover:bg-accent/30 group-hover:opacity-100" />
+                </Tilt>
               </Reveal>
             ))}
           </ul>
@@ -47,10 +44,8 @@ export default function HomePage() {
           <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
             {sections.map((s, i) => (
               <Reveal as="li" key={s.href} delay={i * 0.06} className={i < 2 ? "lg:col-span-3" : "lg:col-span-2"}>
-                <Link
-                  href={s.href}
-                  className="group block overflow-hidden rounded-xl border border-line bg-black transition-[border-color,transform] duration-200 hover:-translate-y-1 hover:border-accent/70"
-                >
+                <Tilt max={3} className="group overflow-hidden rounded-xl border border-line bg-black hover:-translate-y-1">
+                  <Link href={s.href} className="block rounded-xl">
                   <div className="overflow-hidden">
                     <Image
                       src={s.image.src}
@@ -70,14 +65,15 @@ export default function HomePage() {
                       →
                     </span>
                   </div>
-                </Link>
+                  </Link>
+                </Tilt>
               </Reveal>
             ))}
           </ul>
         </Container>
       </section>
 
-      <section id="tariffs" aria-labelledby="tariffs-title" className="py-20 sm:py-24">
+      <section id="tariffs" data-scene="pricing" aria-labelledby="tariffs-title" className="py-20 sm:py-24">
         <SectionRule index="03" />
         <Container className="mt-10">
           <div className="flex flex-col justify-between gap-6 md:flex-row md:items-end">
@@ -95,7 +91,7 @@ export default function HomePage() {
         </Container>
       </section>
 
-      <section aria-labelledby="devices-title" className="border-y border-line bg-surface/30 py-20 sm:py-24">
+      <section data-scene="connect" aria-labelledby="devices-title" className="border-y border-line bg-surface/30 py-20 sm:py-24">
         <SectionRule index="04" />
         <Container className="mt-10 grid items-center gap-12 lg:grid-cols-2">
           <Reveal>
@@ -126,7 +122,7 @@ export default function HomePage() {
         </Container>
       </section>
 
-      <section aria-labelledby="steps-title" className="py-20 sm:py-24">
+      <section data-scene="connect" aria-labelledby="steps-title" className="py-20 sm:py-24">
         <SectionRule index="05" />
         <Container className="mt-10">
           <SectionHeading id="steps-title" eyebrow="Подключение" title="Три шага до подключения" />
@@ -154,7 +150,7 @@ export default function HomePage() {
         </Container>
       </section>
 
-      <section aria-labelledby="faq-title" className="border-y border-line bg-surface/30 py-20 sm:py-24">
+      <section data-scene="calm" aria-labelledby="faq-title" className="border-y border-line bg-surface/30 py-20 sm:py-24">
         <SectionRule index="06" />
         <Container className="mt-10 grid gap-10 lg:grid-cols-[0.8fr_1.2fr]">
           <div>
@@ -167,7 +163,7 @@ export default function HomePage() {
         </Container>
       </section>
 
-      <section aria-labelledby="support-title" className="pt-20 sm:pt-24">
+      <section data-scene="home" aria-labelledby="support-title" className="pt-20 sm:pt-24">
         <Container>
           <Reveal className="relative grid items-center gap-10 overflow-hidden rounded-2xl border border-accent/30 bg-gradient-to-br from-surface to-bg p-6 sm:p-12 lg:grid-cols-2">
             <div aria-hidden="true" className="glow-lg absolute -right-20 -top-20 size-80 rounded-full bg-accent/20 blur-3xl" />

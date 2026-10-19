@@ -4,12 +4,13 @@ import type { ComponentProps } from "react";
 type Variant = "primary" | "secondary" | "ghost";
 
 const base =
-  "inline-flex min-h-11 items-center justify-center gap-2 rounded-md px-5 text-sm font-semibold tracking-wide transition-[background-color,border-color,color,transform] duration-150 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50";
+  "inline-flex min-h-11 select-none items-center justify-center gap-2 rounded-md px-5 text-sm font-semibold tracking-wide transition-[background-color,border-color,color,box-shadow,translate,scale] duration-200 ease-out hover:-translate-y-px active:translate-y-0 active:scale-[0.97] active:duration-75 focus-visible:outline-offset-4 disabled:pointer-events-none disabled:opacity-50";
 
 const variants: Record<Variant, string> = {
   primary:
-    "btn-shine bg-accent-strong text-white shadow-[0_0_24px_-6px_rgb(255_35_70/0.7)] hover:bg-[#e3143a]",
-  secondary: "btn-shine border border-line bg-surface text-fg hover:border-accent/70 hover:bg-surface-2",
+    "btn-shine bg-accent-strong text-white shadow-[0_0_22px_-8px_rgb(229_9_20/0.75)] hover:bg-[#e00b16] hover:shadow-[0_0_0_1px_rgb(255_32_53/0.45),0_10px_34px_-10px_rgb(229_9_20/0.9)]",
+  secondary:
+    "btn-shine border border-line bg-surface/90 text-fg hover:border-brand/80 hover:bg-surface-2 hover:shadow-[0_8px_28px_-14px_rgb(229_9_20/0.8)]",
   ghost: "text-muted hover:text-fg",
 };
 
