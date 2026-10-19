@@ -17,10 +17,10 @@ export function mapHttpStatus(status: number): ApiErrorCode {
 }
 
 /**
- * Transport for the existing FastAPI service: timeout via AbortController,
- * bounded retries for reads only, no caching of personal responses.
- * Response mapping is intentionally not implemented until the OpenAPI schema
- * and auth flow are verified (see BACKEND_CHANGE_REQUEST.md).
+ * LIVE client for the existing FastAPI service. Transport is real (timeout via
+ * AbortSignal, bounded retries for reads only, no caching). Response mapping and
+ * session forwarding are NOT implemented until the OpenAPI schema and auth flow
+ * are verified, so every method returns `contract_unverified` (see API_CONTRACT.md).
  */
 export function createLiveClient({ baseUrl, timeoutMs }: LiveOptions): OrasakaApiClient {
   async function get(path: string, attempts = 2): Promise<ApiResult<unknown>> {
@@ -45,17 +45,25 @@ export function createLiveClient({ baseUrl, timeoutMs }: LiveOptions): OrasakaAp
     return { ok: false, error: last };
   }
 
-  async function unverified(path: string): Promise<ApiResult<never>> {
-    const res = await get(path);
-    return res.ok ? { ok: false, error: "contract_unverified" } : res;
-  }
+  const unverified = async (): Promise<ApiResult<never>> =>
+    baseUrl ? { ok: false, error: "contract_unverified" } : { ok: false, error: "backend_not_configured" };
 
   return {
-    listPlans: () => unverified("/plans"),
-    // Personal endpoints need the verified site auth flow; no session is forwarded yet.
-    getAccount: async () => ({ ok: false, error: "contract_unverified" }),
-    createOrder: async () => ({ ok: false, error: "contract_unverified" }),
-    getOrder: async () => ({ ok: false, error: "contract_unverified" }),
-    cancelOrder: async () => ({ ok: false, error: "contract_unverified" }),
+    source: "live",
+    auth: {
+      getSession: async () => ({ ok: true, data: { authenticated: false, user: null, demoLoginAvailable: false } }),
+      loginWithTelegram: unverified,
+      logout: async () => ({ ok: true, data: null }),
+    },
+    plans: {
+      list: async () => {
+        const res = await get("/plans");
+        return res.ok ? { ok: false, error: "contract_unverified" } : res;
+      },
+    },
+    orders: { create: unverified, get: unverified, list: unverified, cancel: unverified },
+    subscription: { get: unverified, renew: unverified },
+    connection: { getLink: unverified },
+    devices: { list: unverified, remove: unverified },
   };
 }

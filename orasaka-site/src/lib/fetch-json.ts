@@ -1,27 +1,14 @@
 import type { z } from "zod";
-import type { ApiErrorCode, ApiResult } from "@/lib/api/types";
+import { API_ERROR_CODES, SOURCE_HEADER, type ApiErrorCode, type DataSource } from "@/lib/api/types";
 
-const KNOWN: ApiErrorCode[] = [
-  "unauthorized",
-  "forbidden",
-  "not_found",
-  "conflict",
-  "rate_limited",
-  "timeout",
-  "unavailable",
-  "bad_request",
-  "bad_response",
-  "payments_disabled",
-  "backend_not_configured",
-  "contract_unverified",
-];
+export type FetchResult<T> = { ok: true; data: T; source: DataSource } | { ok: false; error: ApiErrorCode };
 
 /** Browser → same-origin BFF only. Validates the response shape at the boundary. */
 export async function fetchJson<S extends z.ZodType>(
   path: string,
   schema: S,
   init: RequestInit & { timeoutMs?: number } = {},
-): Promise<ApiResult<z.infer<S>>> {
+): Promise<FetchResult<z.infer<S>>> {
   const { timeoutMs = 10_000, signal, ...rest } = init;
   const timeout = AbortSignal.timeout(timeoutMs);
   try {
@@ -34,12 +21,21 @@ export async function fetchJson<S extends z.ZodType>(
     const body: unknown = await res.json().catch(() => null);
     if (!res.ok) {
       const code = (body as { error?: string } | null)?.error as ApiErrorCode | undefined;
-      return { ok: false, error: code && KNOWN.includes(code) ? code : "unavailable" };
+      return { ok: false, error: code && API_ERROR_CODES.includes(code) ? code : "unavailable" };
     }
     const parsed = schema.safeParse(body);
-    return parsed.success ? { ok: true, data: parsed.data } : { ok: false, error: "bad_response" };
+    const source: DataSource = res.headers.get(SOURCE_HEADER) === "live" ? "live" : "mock";
+    return parsed.success ? { ok: true, data: parsed.data, source } : { ok: false, error: "bad_response" };
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError" && signal?.aborted) throw err;
     return { ok: false, error: err instanceof DOMException && err.name === "TimeoutError" ? "timeout" : "unavailable" };
   }
+}
+
+export function postJson<S extends z.ZodType>(path: string, schema: S, body: unknown, headers: Record<string, string> = {}) {
+  return fetchJson(path, schema, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...headers },
+    body: JSON.stringify(body),
+  });
 }

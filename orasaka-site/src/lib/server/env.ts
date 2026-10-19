@@ -11,6 +11,8 @@ export type ServerEnv = {
   demoFixtures: boolean;
   apiBaseUrl: string | null;
   apiTimeoutMs: number;
+  /** Public origin used for allowlisted payment return URLs; relative paths when unset (demo). */
+  siteOrigin: string;
 };
 
 function parseApiBaseUrl(raw: string | undefined): string | null {
@@ -40,5 +42,6 @@ export function getServerEnv(): ServerEnv {
     demoFixtures: siteMode === "demo" && process.env.DEMO_FIXTURES === "test",
     apiBaseUrl: parseApiBaseUrl(process.env.ORASAKA_API_URL),
     apiTimeoutMs: Number(process.env.ORASAKA_API_TIMEOUT_MS) || 8000,
+    siteOrigin: parseApiBaseUrl(process.env.SITE_ORIGIN) ?? "",
   };
 }

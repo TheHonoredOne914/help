@@ -1,18 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { MockOrderStore } from "../src/lib/api/mock-store";
+import { MockDb } from "../src/lib/api/mock/mock-db";
 import type { Plan } from "../src/lib/api/types";
 import { applyOrderStatus } from "../src/lib/order-status";
 
 const plans: Plan[] = [
-  {
-    id: "p1",
-    title: "TEST",
-    durationMonths: 1,
-    prices: [{ amountMinor: 10000, currency: "RUB" }],
-    conditions: [],
-    test: true,
-  },
+  { id: "p1", title: "TEST 1", durationMonths: 1, prices: [{ amountMinor: 100, currency: "RUB" }], conditions: [], test: true },
+  { id: "p2", title: "TEST 2", durationMonths: 3, prices: [{ amountMinor: 300, currency: "RUB" }], conditions: [], test: true },
 ];
+
+const newDb = () => new MockDb(() => plans, { provisioningDelayMs: 0 });
+const input = (key: string, planId = "p1") => ({ planId, idempotencyKey: key, paymentMethod: "mock", kind: "new" as const });
 
 describe("order status transitions", () => {
   it("never rolls a final or later state back", () => {
@@ -28,56 +25,73 @@ describe("order status transitions", () => {
   });
 });
 
-describe("mock order store", () => {
+describe("MockDb orders", () => {
   it("returns the same order for a repeated idempotency key", () => {
-    const store = new MockOrderStore(() => plans);
-    const a = store.create("u1", "p1", "key-0000000000000001");
-    const b = store.create("u1", "p1", "key-0000000000000001");
+    const db = newDb();
+    const a = db.createOrder("u1", input("k-1"));
+    const b = db.createOrder("u1", input("k-1"));
     expect(a.ok && b.ok && a.data.id === b.data.id).toBe(true);
+    expect(db.listOrders("u1")).toHaveLength(1);
   });
 
-  it("rejects key reuse with a different plan", () => {
-    const store = new MockOrderStore(() => [...plans, { ...plans[0], id: "p2" }]);
-    store.create("u1", "p1", "key-0000000000000002");
-    expect(store.create("u1", "p2", "key-0000000000000002")).toEqual({ ok: false, error: "conflict" });
+  it("rejects a reused key with a different plan", () => {
+    const db = newDb();
+    db.createOrder("u1", input("k-1"));
+    expect(db.createOrder("u1", input("k-1", "p2"))).toEqual({ ok: false, error: "conflict" });
+  });
+
+  it("scopes idempotency keys per user", () => {
+    const db = newDb();
+    const a = db.createOrder("u1", input("k-1"));
+    const b = db.createOrder("u2", input("k-1"));
+    expect(a.ok && b.ok && a.data.id !== b.data.id).toBe(true);
+  });
+
+  it("snapshots the server price and rejects unknown plans", () => {
+    const db = newDb();
+    const a = db.createOrder("u1", input("k-1", "p2"));
+    expect(a.ok && a.data.amount).toEqual({ amountMinor: 300, currency: "RUB" });
+    expect(db.createOrder("u1", input("k-2", "nope"))).toEqual({ ok: false, error: "not_found" });
   });
 
   it("hides other users' orders", () => {
-    const store = new MockOrderStore(() => plans);
-    const created = store.create("u1", "p1", "key-0000000000000003");
-    if (!created.ok) throw new Error("create failed");
-    expect(store.get("u2", created.data.id)).toEqual({ ok: false, error: "not_found" });
-    expect(store.cancel("u2", created.data.id)).toEqual({ ok: false, error: "not_found" });
+    const db = newDb();
+    const a = db.createOrder("u1", input("k-1"));
+    if (!a.ok) throw new Error("setup");
+    expect(db.getOrder("u2", a.data.id)).toEqual({ ok: false, error: "not_found" });
+    expect(db.cancelOrder("u2", a.data.id)).toEqual({ ok: false, error: "not_found" });
   });
 
-  it("fulfils exactly once despite repeated events", () => {
-    const store = new MockOrderStore(() => plans);
-    const created = store.create("u1", "p1", "key-0000000000000004");
-    if (!created.ok) throw new Error("create failed");
-    const id = created.data.id;
-    store.applyEvent(id, "paid");
-    store.applyEvent(id, "paid");
-    expect(store.fulfil(id)).toBe(true);
-    expect(store.fulfil(id)).toBe(false);
-    store.applyEvent(id, "awaiting_payment");
-    const after = store.get("u1", id);
-    expect(after.ok && after.data.status).toBe("active");
+  it("refuses renewal without a subscription", () => {
+    const db = newDb();
+    expect(db.createOrder("u1", { ...input("k-1"), kind: "renewal" })).toEqual({ ok: false, error: "conflict" });
   });
 
-  it("does not grant access after cancellation", () => {
-    const store = new MockOrderStore(() => plans);
-    const created = store.create("u1", "p1", "key-0000000000000005");
-    if (!created.ok) throw new Error("create failed");
-    store.cancel("u1", created.data.id);
-    store.applyEvent(created.data.id, "paid");
-    expect(store.fulfil(created.data.id)).toBe(false);
-    const after = store.get("u1", created.data.id);
-    expect(after.ok && after.data.status).toBe("cancelled");
+  it("expires unpaid orders", () => {
+    const db = newDb();
+    const a = db.createOrder("u1", input("k-1"));
+    if (!a.ok) throw new Error("setup");
+    const later = new Date(Date.now() + 31 * 60_000);
+    const got = db.getOrder("u1", a.data.id, later);
+    expect(got.ok && got.data.status).toBe("expired");
   });
 
-  it("uses the server-side price snapshot", () => {
-    const store = new MockOrderStore(() => plans);
-    const created = store.create("u1", "p1", "key-0000000000000006");
-    expect(created.ok && created.data.amount).toEqual({ amountMinor: 10000, currency: "RUB" });
+  it("cancelling grants nothing", () => {
+    const db = newDb();
+    const a = db.createOrder("u1", input("k-1"));
+    if (!a.ok) throw new Error("setup");
+    const c = db.cancelOrder("u1", a.data.id);
+    expect(c.ok && c.data.status).toBe("cancelled");
+    expect(db.getSubscription("u1").status).toBe("none");
+  });
+
+  it("fulfils an order exactly once", () => {
+    const db = newDb();
+    const a = db.createOrder("u1", input("k-1"));
+    if (!a.ok) throw new Error("setup");
+    db.applyOrderStatus(a.data.id, "paid");
+    expect(db.fulfil(a.data.id)).toBe(true);
+    expect(db.fulfil(a.data.id)).toBe(false);
+    expect(db.getSubscription("u1").status).toBe("active");
   });
 });

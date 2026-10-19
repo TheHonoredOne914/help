@@ -1,29 +1,66 @@
-import type { Account, ApiResult, Order, PlansResponse } from "./types";
+import type {
+  ApiResult,
+  Capabilities,
+  Connection,
+  DevicesResponse,
+  Order,
+  Plan,
+  Session,
+  Subscription,
+} from "./types";
 
-export type DemoScenario = "active" | "provisioning" | "unpaid" | "none" | "unauthorized" | "error";
+export type DemoPreset = "empty" | "active" | "provisioning";
 
-export const DEMO_SCENARIOS: { id: DemoScenario; label: string }[] = [
-  { id: "active", label: "Доступ активен" },
-  { id: "provisioning", label: "Оплачен, доступ готовится" },
-  { id: "unpaid", label: "Заказ не оплачен" },
-  { id: "none", label: "Нет подписки" },
-  { id: "unauthorized", label: "Не выполнен вход" },
-  { id: "error", label: "Ошибка backend" },
+export const DEMO_PRESETS: { id: DemoPreset; label: string }[] = [
+  { id: "empty", label: "Без подписки" },
+  { id: "active", label: "Подписка активна" },
+  { id: "provisioning", label: "Оплачено, доступ готовится" },
 ];
 
 export type RequestContext = {
-  /** Canonical user id resolved from the server-side session; never taken from the browser. */
-  userId: string | null;
-  demoScenario?: DemoScenario;
+  /** Opaque server-side session id from the HttpOnly cookie; never a user id from the browser. */
+  sessionId: string | null;
 };
 
+export type CreateOrderInput = { planId: string; idempotencyKey: string; paymentMethod: string };
+
+/**
+ * Website → backend boundary, grouped by domain. One implementation talks to
+ * the existing FastAPI service (live-client.ts), the other is an isolated
+ * in-memory demo (mock-client.ts). UI code never imports either directly.
+ */
 export interface OrasakaApiClient {
-  listPlans(): Promise<ApiResult<Omit<PlansResponse, "checkout">>>;
-  getAccount(ctx: RequestContext): Promise<ApiResult<Account>>;
-  createOrder(
-    ctx: RequestContext,
-    input: { planId: string; idempotencyKey: string },
-  ): Promise<ApiResult<Order>>;
-  getOrder(ctx: RequestContext, orderId: string): Promise<ApiResult<Order>>;
-  cancelOrder(ctx: RequestContext, orderId: string): Promise<ApiResult<Order>>;
+  readonly source: "mock" | "live";
+
+  auth: {
+    getSession(ctx: RequestContext): Promise<ApiResult<Session>>;
+    /** Exchanges verified Telegram Login data for a backend session. */
+    loginWithTelegram(payload: Record<string, string>): Promise<ApiResult<{ sessionId: string }>>;
+    logout(ctx: RequestContext): Promise<ApiResult<null>>;
+  };
+
+  plans: {
+    list(): Promise<ApiResult<{ plans: Plan[]; capabilities: Capabilities }>>;
+  };
+
+  orders: {
+    create(ctx: RequestContext, input: CreateOrderInput): Promise<ApiResult<Order>>;
+    get(ctx: RequestContext, orderId: string): Promise<ApiResult<Order>>;
+    list(ctx: RequestContext): Promise<ApiResult<Order[]>>;
+    cancel(ctx: RequestContext, orderId: string): Promise<ApiResult<Order>>;
+  };
+
+  subscription: {
+    get(ctx: RequestContext): Promise<ApiResult<Subscription>>;
+    renew(ctx: RequestContext, input: CreateOrderInput): Promise<ApiResult<Order>>;
+  };
+
+  connection: {
+    getLink(ctx: RequestContext): Promise<ApiResult<Connection>>;
+  };
+
+  devices: {
+    list(ctx: RequestContext): Promise<ApiResult<DevicesResponse>>;
+    remove(ctx: RequestContext, deviceId: string): Promise<ApiResult<DevicesResponse>>;
+  };
 }
