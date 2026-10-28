@@ -1,0 +1,82 @@
+/* Local OFL subsets. JetBrains Mono is a variable face (400–800). Golos Text is pinned to 400. */
+/* Golos Text cyrillic */
+@font-face {
+  font-family: "Golos Text";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/golos-400-cyrillic.woff2") format("woff2");
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* Golos Text latin-ext */
+@font-face {
+  font-family: "Golos Text";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/golos-400-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* Golos Text latin */
+@font-face {
+  font-family: "Golos Text";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/golos-400-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* JetBrains Mono cyrillic */
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url("/fonts/jetbrains-cyrillic.woff2") format("woff2");
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* JetBrains Mono latin-ext */
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url("/fonts/jetbrains-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* JetBrains Mono latin */
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url("/fonts/jetbrains-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* Orasaka Marks — decorative kana/kanji only, always loaded */
+@font-face {
+  font-family: "Orasaka Marks";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/orasaka-marks.woff2") format("woff2");
+  unicode-range: U+30aa-30ab, U+30b5, U+30e9, U+4fe1, U+63a5, U+7d9a, U+901a;
+}
+/* Noto Sans JP subset A — loaded only when html lang is ja */
+@font-face {
+  font-family: "Noto Sans JP";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/noto-sans-jp-a.woff2") format("woff2");
+  unicode-range: U+b7, U+42e, U+2014, U+2026, U+20bd, U+3001-3002, U+3005, U+300c-300d, U+3042, U+3044, U+3046, U+3048, U+304a-306b, U+306e-3082, U+3084, U+3088-308c, U+308f, U+3092-3094, U+3099-309a, U+30a1-30a4, U+30a6, U+30a8-30c0, U+30c3, U+30c6-30cb, U+30cd-30de, U+30e0-30e2, U+30e5, U+30e7, U+30e9-30ed, U+30ef, U+30f3-30f4, U+30f7, U+30fc, U+4e00, U+4e0a-4e0b, U+4e0d, U+4e2d, U+4e3b, U+4e86, U+4e88, U+4e8c, U+4eba, U+4eca, U+4ed6, U+4ee3, U+4ee5, U+4ef6, U+4f53, U+4f5c, U+4f7f, U+4f8b, U+4fa1, U+4fdd, U+4fe1, U+5024, U+5074, U+5099, U+50cd, U+5143, U+5148, U+5165, U+5168, U+516c, U+5171, U+5178, U+5185, U+518d, U+51e6, U+51fa, U+5206-5207, U+521d, U+5225, U+5229, U+5236, U+524d, U+529b, U+52a0, U+52a9, U+52b9, U+52d5, U+52dd, U+5316, U+5358, U+539f, U+53d6, U+53e3, U+53ef, U+53f7, U+5404, U+5408, U+540c-540d, U+5411, U+54c1, U+554f, U+56db, U+56de, U+56f3, U+56fa, U+56fd, U+5728, U+5730, U+5831, U+5834, U+58eb, U+5909;
+}
+/* Noto Sans JP subset B */
+@font-face {
+  font-family: "Noto Sans JP";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/noto-sans-jp-b.woff2") format("woff2");
+  unicode-range: U+591a, U+5931, U+5951, U+59cb, U+5b50, U+5b58, U+5b85, U+5b88, U+5b8c, U+5b9a, U+5b9f, U+5bfe, U+5c06, U+5c11, U+5c65, U+5dee, U+5e97, U+5ea6, U+5ef6, U+5f01, U+5f0f, U+5f15, U+5f85, U+5f8c, U+5f93, U+5f97, U+5fa9, U+5fc5, U+5fdc, U+60c5, U+610f, U+614b, U+6210, U+623b, U+6240, U+624b, U+6253, U+6255, U+6280, U+629e, U+6301, U+6307, U+63a5, U+63b2, U+643a, U+652f, U+6557, U+6570, U+6587, U+6599, U+65ad, U+65b0, U+65b9, U+65e5, U+65e7, U+660e, U+6642, U+6697, U+66f4, U+66f8, U+6700, U+6708-6709, U+671f, U+672a, U+672c, U+675f, U+6761, U+6765, U+683c, U+6848, U+696d, U+6982, U+69d8, U+6b04, U+6b21, U+6b62-6b63, U+6b74, U+6b8b, U+6c7a, U+6cd5, U+6ce8, U+6d3b, U+6d41, U+6d88, U+6e08, U+6e21, U+6e2c, U+6e96, U+70b9, U+7121, U+7248, U+7279, U+72b6, U+72ec, U+73fe, U+7406, U+751f, U+7528, U+7531, U+7533, U+753b, U+7559, U+756a, U+767a-767b, U+7684, U+76f4, U+77e5, U+77ed, U+78ba, U+793a, U+79fb, U+7a3c, U+7a7a, U+7b54, U+7b56, U+7b97, U+7ba1, U+7c21, U+7d04, U+7d0b, U+7d42, U+7d4c, U+7d61, U+7d71, U+7d9a, U+7dcf, U+7dd1, U+7dda, U+8005, U+81ea, U+81f4, U+8217, U+843d, U+884c, U+8853, U+8868, U+88fd, U+8907, U+8981, U+898b, U+89a7, U+8a00, U+8a08, U+8a18, U+8a2d, U+8a33, U+8a3c, U+8a66, U+8a71, U+8a8d, U+8a9e, U+8aac-8aad, U+8ab2, U+8b58, U+8b77, U+8cbc, U+8cea, U+8cfc, U+8d77, U+8db3, U+8def, U+8eab, U+8f09, U+8fbc, U+8fd4, U+8ffd, U+9001, U+901a, U+9023, U+9045, U+904b, U+9055, U+9078, U+90e8, U+91cf, U+91d1, U+9332, U+9577, U+9589, U+958b, U+9593, U+9632, U+9650, U+9694, U+969b, U+96a0, U+96e2, U+96fb, U+9762, U+9806, U+984c-984d, U+ff08-ff09, U+ff1f;
+}
