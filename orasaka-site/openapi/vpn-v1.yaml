@@ -1,0 +1,144 @@
+openapi: 3.0.3
+info:
+  title: ORASAKA proposed VPN contract
+  version: 1.2.0
+  description: >
+    Proposed contract for the site adapter. These routes are not Remnawave routes
+    and are not the live bot API. A backend implementation or mapping is still required.
+    device_limit is null until the owner sets a device policy. There is no traffic or country field.
+    Subscription, purchases and devices are separate responses. A 404 subscription does not mean the other two are empty.
+    Purchase currency is RUB. A purchase order_id is the site order id when both rows are the same payment; the purchase id is not.
+    duration_rule values the stand implements: calendar-months, fixed-day-blocks, and isolated-only test-30-day-blocks.
+    Renewal base is max(current end, grant time). An empty or unknown rule means the site does not charge.
+servers:
+  - url: http://127.0.0.1:9
+    description: Local contract stand. Not production.
+security:
+  - bearerAuth: []
+paths:
+  /v1/users:
+    get:
+      summary: Find a user by numeric Telegram id, email, or internal id
+      parameters:
+        - in: query
+          name: telegram_id
+          schema: { type: string }
+        - in: query
+          name: email
+          schema: { type: string }
+        - in: query
+          name: id
+          schema: { type: string }
+      responses:
+        "200":
+          description: User or null. Null is not an error and not an empty subscription invented by the site.
+        "401":
+          description: forbidden
+    post:
+      summary: Link an existing user or create one without a second row for the same Telegram id
+      responses:
+        "200":
+          description: Linked or created user
+        "409":
+          description: conflict
+  /v1/users/{id}/subscription:
+    get:
+      summary: Stable subscription id, status, expires_at, limits, connection
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Subscription. limits.device_limit is null when the owner has not set it.
+        "404":
+          description: No subscription. Purchases and devices are separate requests and may still be 200.
+  /v1/users/{id}/purchases:
+    get:
+      summary: Bot payment history, paginated, stable ids
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+        - in: query
+          name: cursor
+          schema: { type: string }
+      responses:
+        "200":
+          description: >
+            items, next_cursor, prev_cursor, boundary. Each item has id and order_id.
+            order_id is the site order id for the same payment, or null. Do not dedupe on id.
+            currency is RUB. boundary not_stored means the bot did not keep history.
+            Do not reconstruct rows from expires_at.
+        "503":
+          description: down. The site still shows orders it already has.
+  /v1/users/{id}/devices:
+    get:
+      summary: Devices, limit, last activity, and a separate online field
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: >
+            online is known or unknown. unknown is not zero. A row online value is not a device count.
+            limit null means the owner has not set a device limit.
+  /v1/users/{id}/devices/{deviceId}/revoke:
+    post:
+      summary: Revoke one device that belongs to this user
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: deviceId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Revoked
+        "404":
+          description: not_found when the device is not on this user
+  /v1/grants:
+    post:
+      summary: Idempotent grant or renewal by order_id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [order_id, term_months, duration_rule]
+              properties:
+                order_id: { type: string }
+                site_account_id: { type: string, nullable: true }
+                telegram_id: { type: string, nullable: true }
+                email: { type: string, nullable: true }
+                term_months: { type: integer }
+                duration_rule:
+                  type: string
+                  nullable: true
+                  enum: [calendar-months, fixed-day-blocks, test-30-day-blocks]
+                  description: >
+                    calendar-months — add N calendar months from max(current end, grant time).
+                    fixed-day-blocks — add N × 30 days from max(current end, grant time).
+                    test-30-day-blocks — isolated test only; the public profile must not send it.
+                    null or any other value is duration_unconfigured and changes nothing.
+                    The site does not start a charge unless one of these rules is configured in VPN_DURATION_RULE.
+      responses:
+        "200":
+          description: ref, expires_at, term_months, connection_url, already_granted. A repeat does not extend twice.
+        "409":
+          description: conflict or duration_unconfigured
+        "503":
+          description: down
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
